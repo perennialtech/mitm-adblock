@@ -1,0 +1,2 @@
+mitmproxy>=11
+adblock>=0.6
