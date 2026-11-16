@@ -1,0 +1,56 @@
+name: Publish container image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    if: github.repository == 'perennialtech/mitm-adblock'
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE: ghcr.io/perennialtech/mitm-adblock
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: |
+          docker buildx create --use --driver docker-container
+          docker buildx build --platform linux/amd64 --load --tag mitm-adblock:ci .
+
+      - name: Smoke test
+        run: |
+          printf '/filtered.js$script\n' > "$RUNNER_TEMP/filter.txt"
+          trap 'docker logs mitm-adblock-ci; docker rm --force mitm-adblock-ci' EXIT
+          docker run --detach --name mitm-adblock-ci --publish 127.0.0.1::8080 \
+            --mount "type=bind,source=$RUNNER_TEMP/filter.txt,target=/filter.txt,readonly" \
+            mitm-adblock:ci --set adblock_lists=/filter.txt
+
+          proxy="http://$(docker port mitm-adblock-ci 8080/tcp)"
+          curl -q --fail --silent --show-error --noproxy '' --proxy "$proxy" \
+            --retry 10 --retry-all-errors --retry-delay 1 --max-time 5 \
+            --output /dev/null http://mitm.it/
+          status=$(curl -q --silent --show-error --noproxy '' --proxy "$proxy" --max-time 5 \
+            --header 'Sec-Fetch-Dest: script' --output /dev/null --write-out '%{http_code}' \
+            http://example.invalid/filtered.js)
+          test "$status" = 204
+
+      - name: Publish to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          tags=(--tag "$IMAGE:sha-$GITHUB_SHA")
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            tags+=(--tag "$IMAGE:$GITHUB_REF_NAME" --tag "$IMAGE:latest")
+          fi
+          docker buildx build --platform linux/amd64 \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --output type=registry,oci-mediatypes=true "${tags[@]}" .

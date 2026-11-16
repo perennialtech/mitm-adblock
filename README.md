@@ -9,13 +9,34 @@ An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
 
 ## Usage
 
-    pip install -r requirements.txt
-    mitmdump -s adblock_addon.py
+Run the [container image](https://github.com/perennialtech/mitm-adblock/pkgs/container/mitm-adblock)
+on Linux x86-64. For a private GHCR package, sign in to `ghcr.io` with an
+account that has package read access before running:
 
-Point your browser or system proxy at `127.0.0.1:8080`, then install the CA
-from http://mitm.it (open it through the proxy).
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 \
+  -v mitm-adblock-ca:/var/lib/mitmproxy \
+  ghcr.io/perennialtech/mitm-adblock:latest
+```
 
-For phones: `mitmdump --mode wireguard -s adblock_addon.py`, then scan the QR code.
+The volume keeps the proxy's CA across restarts. Keep its private key on
+the proxy host. To share the proxy with trusted LAN or VPN clients,
+replace `127.0.0.1` in the port mapping with the host's LAN address and
+restrict access to that network.
+
+To run from a checkout instead:
+
+```sh
+pip install -r requirements.txt
+mitmdump -s adblock_addon.py
+```
+
+Point your browser or system proxy at the proxy host and port, then open
+http://mitm.it through the proxy to install the CA for HTTPS filtering.
+
+To run mitmproxy as its own WireGuard server, start it with
+`mitmweb --mode wireguard -s adblock_addon.py` and import the configuration
+shown in the web interface.
 
 ## Options (`--set name=value`)
 
