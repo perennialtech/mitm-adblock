@@ -10,7 +10,8 @@ An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
 ## Usage
 
 Run the [container image](https://github.com/perennialtech/mitm-adblock/pkgs/container/mitm-adblock)
-on Linux x86-64:
+on Linux x86-64. For a private GHCR package, sign in to `ghcr.io` with an
+account that has package read access before running:
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
