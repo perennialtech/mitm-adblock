@@ -1,8 +1,10 @@
 import io
+import os
 import tempfile
 import zipfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,7 +12,7 @@ from unittest.mock import patch
 from mitmproxy import connection, ctx, http, options
 
 from adblock_addon import AdBlock, TIF_FULL, TIF_MEDIUM, _cached_list
-from threatfox import domains_from_export
+from threatfox import ThreatFoxSnapshot, snapshot_from_export
 
 
 def flow_for(url, method="GET"):
@@ -120,19 +122,18 @@ class AdBlockTests(unittest.TestCase):
         self.assertEqual(flow.response.status_code, 403)
 
     def test_threatfox_uses_exact_eligible_hosts_and_honors_exceptions(self):
-        report = b"""# "first_seen_utc", "ioc_value", "ioc_type", "threat_type", "confidence_level", "is_compromised"
-"timestamp", "bad.hosted.test", "domain", "botnet_cc", "90", "False"
-"timestamp", "allow.hosted.test", "domain", "payload_delivery", "90", "False"
-"timestamp", "compromised.hosted.test", "domain", "botnet_cc", "100", "True"
-"timestamp", "low.hosted.test", "domain", "botnet_cc", "50", "False"
-"timestamp", "https://url.hosted.test/path", "url", "payload_delivery", "100", "False"
+        report = b"""# "first_seen_utc", "last_seen_utc", "ioc_value", "ioc_type", "threat_type", "confidence_level", "is_compromised"
+"timestamp", "", "bad.hosted.test", "domain", "botnet_cc", "90", "False"
+"timestamp", "", "allow.hosted.test", "domain", "payload_delivery", "90", "False"
+"timestamp", "", "compromised.hosted.test", "domain", "botnet_cc", "100", "True"
+"timestamp", "", "low.hosted.test", "domain", "botnet_cc", "50", "False"
 """
         raw = io.BytesIO()
         with zipfile.ZipFile(raw, "w") as archive:
             archive.writestr("sample.csv", report)
-        domains = domains_from_export(raw.getvalue())
+        snapshot = snapshot_from_export(raw.getvalue())
         ctx.options.update(adblock_threatfox_key_file="/unused/key", adblock_cache_dir=str(self.rules.parent))
-        with patch("adblock_addon.fetch_threatfox_domains", return_value=domains):
+        with patch("adblock_addon.fetch_snapshot", return_value=snapshot):
             self.load_rules("@@||allow.hosted.test^$document")
         for url, blocked in (
             ("https://bad.hosted.test:443/landing", True),
@@ -143,16 +144,16 @@ class AdBlockTests(unittest.TestCase):
             ("https://hosted.test/", False),
             ("https://compromised.hosted.test/", False),
             ("https://low.hosted.test/", False),
-            ("https://url.hosted.test/path", False),
             ("https://allow.hosted.test/", False),
         ):
             with self.subTest(url=url):
                 flow = flow_for(url)
                 self.addon.request(flow)
                 self.assertEqual(flow.response is not None, blocked)
-        saved = self.rules.parent / "threatfox-domains.txt"
-        self.assertEqual(set(saved.read_text().splitlines()), domains)
-        with patch("adblock_addon.fetch_threatfox_domains", side_effect=OSError("sensitive response")):
+        saved = self.rules.parent / "threatfox.json"
+        with saved.open() as file:
+            self.assertEqual(ThreatFoxSnapshot.read(file), snapshot)
+        with patch("adblock_addon.fetch_snapshot", side_effect=OSError("sensitive response")):
             self.addon._build_engine(force=True)
         flow = flow_for("https://bad.hosted.test/")
         self.addon.request(flow)
@@ -160,6 +161,73 @@ class AdBlockTests(unittest.TestCase):
         ctx.options.update(adblock_threatfox_key_file="")
         self.addon.configure({"adblock_threatfox_key_file"})
         flow = flow_for("https://bad.hosted.test/")
+        self.addon.request(flow)
+        self.assertIsNone(flow.response)
+
+    def test_recent_threatfox_payload_url_blocks_only_the_exact_url(self):
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        stamp = now.strftime("%Y-%m-%d %H:%M:%S")
+        old = (now - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S")
+        report = f"""# "first_seen_utc", "last_seen_utc", "ioc_value", "ioc_type", "threat_type", "confidence_level", "is_compromised"
+"{old}", "", "dedicated.test", "domain", "botnet_cc", "90", "False"
+"{old}", "{stamp}", "https://SHARED.test:443/File?token=A#ignored", "url", "payload_delivery", "100", "True"
+"{stamp}", "", "https://allow.test/File", "url", "payload_delivery", "90", "False"
+"{stamp}", "", "https://shared.test/", "url", "payload_delivery", "90", "True"
+"{stamp}", "", "https://shared.test/low", "url", "payload_delivery", "50", "False"
+"{old}", "", "https://shared.test/stale", "url", "payload_delivery", "90", "False"
+"""
+        raw = io.BytesIO()
+        with zipfile.ZipFile(raw, "w") as archive:
+            archive.writestr("sample.csv", report)
+        snapshot = snapshot_from_export(raw.getvalue(), now=now)
+        target = "https://shared.test/File?token=A"
+        self.assertEqual(set(snapshot.payload_urls), {target, "https://allow.test/File"})
+        ctx.options.update(adblock_threatfox_key_file="/unused/key", adblock_cache_dir=str(self.rules.parent))
+        with patch("adblock_addon.fetch_snapshot", return_value=snapshot):
+            self.load_rules("@@||allow.test^$document")
+        for url, blocked in (
+            (target, True),
+            ("https://shared.test/File?token=a", False),
+            ("https://shared.test/file?token=A", False),
+            ("https://shared.test/File?token=A&extra=1", False),
+            ("https://shared.test/File", False),
+            ("https://shared.test:8443/File?token=A", False),
+            ("http://shared.test/File?token=A", False),
+            ("https://shared.test/", False),
+            ("https://allow.test/File", False),
+        ):
+            with self.subTest(url=url):
+                flow = flow_for(url)
+                self.addon.request(flow)
+                self.assertEqual(flow.response is not None, blocked)
+                self.assertEqual(flow.request.url, url)
+                if blocked:
+                    self.assertEqual(flow.metadata["adblock"], "Exact threat payload URL")
+        with patch("adblock_addon.fetch_snapshot", side_effect=OSError):
+            self.addon._build_engine(force=True)
+        flow = flow_for("https://publisher.test/start")
+        flow.response = http.Response.make(302, b"", {"Location": target})
+        self.addon.response(flow)
+        self.assertTrue(flow.metadata["adblock_redirect"])
+        with patch("adblock_addon.time.time", return_value=snapshot.payload_urls[target]):
+            flow = flow_for(target)
+            self.addon.request(flow)
+        self.assertIsNone(flow.response)
+
+    def test_threatfox_upgrade_falls_back_to_recent_domain_cache(self):
+        cache = self.rules.parent
+        legacy = cache / "threatfox-domains.txt"
+        legacy.write_text("dedicated.test\n", encoding="ascii")
+        ctx.options.update(adblock_threatfox_key_file="/unused/key", adblock_cache_dir=str(cache))
+        with patch("adblock_addon.fetch_snapshot", side_effect=OSError):
+            self.load_rules()
+            flow = flow_for("https://dedicated.test/")
+            self.addon.request(flow)
+            self.assertEqual(flow.response.status_code, 403)
+            stale = (datetime.now(timezone.utc) - timedelta(days=8)).timestamp()
+            os.utime(legacy, (stale, stale))
+            self.addon._build_engine(force=True)
+        flow = flow_for("https://dedicated.test/")
         self.addon.request(flow)
         self.assertIsNone(flow.response)
 
