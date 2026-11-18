@@ -25,6 +25,12 @@ jobs:
           docker buildx create --use --driver docker-container
           docker buildx build --platform linux/amd64 --load --tag mitm-adblock:ci .
 
+      - name: Test addon
+        run: |
+          docker run --rm --network=none --entrypoint python \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/tests,target=/tests,readonly" \
+            -e PYTHONPATH=/app mitm-adblock:ci /tests/test_addon.py
+
       - name: Smoke test
         run: |
           printf '/filtered.js$script\n' > "$RUNNER_TEMP/filter.txt"

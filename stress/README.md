@@ -45,7 +45,8 @@ docker build -t mitm-adblock:stress .
 
 The staging script downloads EasyList, EasyPrivacy,
 [HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium),
-and [OISD Big](https://oisd.nl/setup/adblockplus)
+[OISD Big](https://oisd.nl/setup/adblockplus), and
+[uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt)
 from their publishers, copies the bundled first-party rules, and fetches two
 checksum-pinned public data sources. Keep the resulting directory
 to rerun with the same filter snapshots. The workload performs no downloads.
@@ -63,6 +64,10 @@ to rerun with the same filter snapshots. The workload performs no downloads.
   supplies campaign domains involved in malicious push advertising. The
   runner checks each domain as an offline document request and reports those
   results independently. These indicators provide domain-level coverage.
+- The Badware Risks check probes bare document URLs for hostname-only `$all`
+  rules from the downloaded feed and reports results as `badware_all_rules`.
+  This measures how the configured engine applies the feed to navigations.
+  The separately sourced Pushpaganda indicators measure campaign coverage.
 
 Once the guest NIC is disconnected, run:
 
@@ -81,17 +86,18 @@ corpus and expectations. An OOM kill or a timeout fails the run as a
 capacity error and names the configured budget.
 
 These workloads were measured under gVisor in a disconnected Proxmox guest
-with 2 vCPUs and 4 GiB RAM. Each profile replayed the 316-entry publisher HAR
-100 times under a one-core quota.
+with 2 vCPUs and 4 GiB RAM. Both builds used the same six list snapshots,
+including Badware Risks, and replayed the 316-entry publisher HAR 100 times
+under a one-core quota.
 
-| Filter profile | Peak cgroup RAM | Peak cgroup tasks | Replay elapsed |
+| Build | Peak cgroup RAM | Peak cgroup tasks | Replay elapsed |
 |---|---:|---:|---:|
-| EasyList, EasyPrivacy, HaGeZi TIF Medium, and first-party rules | 626 MiB | 31 | 14.0 s |
-| All default lists, including OISD Big | 872 MiB | 29 | 14.5 s |
+| Previous Python binding | 883 MiB | 30 | 15.1 s |
+| adblock-rust 0.13.6 | 221 MiB | 29 | 12.4 s |
 
-The memory default leaves 664 MiB above the higher measured peak for growth
-in list snapshots and more expensive captures. The starter HAR omits response
-bodies. Size a separate budget for workloads with large response bodies.
+The 1,536 MiB default provides headroom for larger list snapshots and captures.
+The starter HAR omits response bodies. Measure workloads with large response
+bodies separately.
 
 To size a new workload, use a disconnected guest with enough memory to
 complete the run. Measure `memory.peak`, `pids.peak` where available, and
@@ -126,12 +132,12 @@ offers raw desktop and mobile browser HARs. Select individual captures within
 the size limits below.
 
 Keep the corpus directory flat. It requires `easylist.txt`, `easyprivacy.txt`,
-and supports optional `tif-medium.txt`, `first-party.txt`, and `oisd-big.txt`
+and supports optional `tif-medium.txt`, `first-party.txt`, `oisd-big.txt`, and `badware.txt`
 filter snapshots. It accepts
 up to 32 uncompressed `*.har` files, optional `<capture>.labels.json` sidecars,
 and the optional `pushpaganda.csv`. Each HAR can be up to 32 MiB, each EasyList
 or EasyPrivacy snapshot up to 8 MiB, and each HaGeZi or OISD snapshot up to
-16 MiB. The first-party rules, each sidecar, and the CSV can be up to 1 MiB
+16 MiB. The first-party and Badware Risks lists, each sidecar, and the CSV can be up to 1 MiB
 each. The total corpus can be up to 128 MiB and expectations can use up to 64
 distinct families. Split larger corpora into batches. The entry count times
 the repeat count is limited to 100,000 per run.
