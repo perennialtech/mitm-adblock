@@ -22,6 +22,7 @@ OPTIONAL_RULES = {
     "tif-medium.txt": 16 * MIB,
     "first-party.txt": MIB,
     "oisd-big.txt": 16 * MIB,
+    "badware.txt": MIB,
 }
 INDICATORS = "pushpaganda.csv"
 CAPTURE_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,90}\.har")

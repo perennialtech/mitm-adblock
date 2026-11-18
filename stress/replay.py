@@ -20,6 +20,7 @@ MAX_OPERATIONS = 100_000
 MAX_FINDINGS = 50
 MAX_FAMILIES = 64
 CAMPAIGN = "pushpaganda.csv"
+BADWARE = "badware.txt"
 FAMILY = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
 DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 
@@ -184,16 +185,30 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
     return dict(counts)
 
 
-def probe_campaign(addon, path):
-    from mitmproxy import connection, http
-
+def campaign_domains(path):
     with path.open(encoding="utf-8-sig", newline="") as stream:
         rows = list(csv.reader(stream))
     if not 0 < len(rows) <= 1_000 or any(
         len(row) != 1 or len(row[0]) > 253 or not DOMAIN.fullmatch(row[0]) for row in rows
     ):
         raise CorpusError("Invalid campaign domain CSV.")
-    domains = {row[0] for row in rows}
+    return {row[0] for row in rows}
+
+
+def badware_domains(path):
+    domains = set()
+    with path.open(encoding="utf-8-sig") as stream:
+        for line in stream:
+            anchor, _, suffix = line.strip().partition("^")
+            domain = anchor.removeprefix("||")
+            if suffix == "$all" and anchor.startswith("||") and len(domain) <= 253 and DOMAIN.fullmatch(domain):
+                domains.add(domain)
+    return domains
+
+
+def probe_domains(addon, path, domains):
+    from mitmproxy import connection, http
+
     blocked = 0
     for domain in sorted(domains):
         flow = http.HTTPFlow(
@@ -213,15 +228,18 @@ def replay(repeat):
     timings = []
     families = defaultdict(Counter)
     findings = []
-    campaign = INPUT / CAMPAIGN
     report = {"filter_sha256": lists, "repeat": repeat, "captures": results}
     for name, entries, labels, files in captures(repeat):
         if len(families.keys() | {label["family"] for label in labels.values()}) > MAX_FAMILIES:
             raise CorpusError("The corpus exceeds 64 expectation families.")
         counts = run_capture(addon, name, entries, labels, repeat, timings, families, findings)
         results[name] = {**files, **counts}
+    campaign = INPUT / CAMPAIGN
     if campaign.exists():
-        report["pushpaganda"] = probe_campaign(addon, campaign)
+        report["pushpaganda"] = probe_domains(addon, campaign, campaign_domains(campaign))
+    badware = INPUT / BADWARE
+    if badware.exists():
+        report["badware_all_rules"] = probe_domains(addon, badware, badware_domains(badware))
     timings.sort()
     report.update(
         hook_p95_us=round(timings[(95 * len(timings) - 1) // 100] / 1_000, 2) if timings else None,

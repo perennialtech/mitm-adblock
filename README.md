@@ -4,7 +4,7 @@ An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
 [adblock-rust](https://github.com/brave/adblock-rust) engine.
 
 - Network blocking with ABP/uBO-syntax lists and checks on HTTP redirect destinations
-- EasyList, EasyPrivacy, [HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium), and [OISD Big](https://oisd.nl/setup/adblockplus) enabled by default
+- EasyList, EasyPrivacy, [HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium), [OISD Big](https://oisd.nl/setup/adblockplus), and [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt) enabled by default
 - Bundled [first-party rules](first-party.txt) for confirmed publisher-hosted ad endpoints
 - Cosmetic filtering: element-hiding CSS injected into HTML, with CSP nonces handled
 - Lists cached in `~/.cache/mitm-adblock` and refreshed every 24 hours
@@ -26,10 +26,11 @@ the proxy host. To share the proxy with trusted LAN or VPN clients,
 replace `127.0.0.1` in the port mapping with the host's LAN address and
 restrict access to that network.
 
-To run from a checkout instead:
+To run from a checkout, install the Rust toolchain used in the Dockerfile,
+then build the Python extension:
 
 ```sh
-pip install -r requirements.txt
+pip install -r requirements.txt ./engine
 mitmdump -s adblock_addon.py
 ```
 
@@ -44,14 +45,15 @@ shown in the web interface.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `adblock_lists` | EasyList, EasyPrivacy, HaGeZi TIF Medium, OISD Big, bundled first-party rules | Comma-separated URLs and/or local paths |
+| `adblock_lists` | EasyList, EasyPrivacy, HaGeZi TIF Medium, OISD Big, uBlock Origin Badware Risks, bundled first-party rules | Comma-separated URLs and/or local paths |
 | `adblock_cache_dir` | `~/.cache/mitm-adblock` | Where downloaded lists are cached |
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
 | `adblock_log_blocked` | `false` | Log every blocked request |
 
 To allow a site, add a rule like `@@||example.com^$document` to your own rules file.
-Setting `adblock_lists` replaces the defaults.
+Setting `adblock_lists` replaces the defaults. The proxy forwards allowed URLs
+with their original query parameters, including when a list contains `$removeparam` rules.
 
 ## First-party ads and tracking
 

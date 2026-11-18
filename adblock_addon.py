@@ -8,7 +8,7 @@ Cosmetic filtering: HTML pages get a <style> block that hides ad elements
 classes/ids), with CSP nonces handled so the injection isn't blocked.
 
 Install:
-    pip install mitmproxy adblock
+    pip install -r requirements.txt ./engine
 
 Run:
     mitmdump -s adblock_addon.py
@@ -39,7 +39,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-import adblock
+from mitm_adblock_engine import Engine
 from mitmproxy import ctx, http
 
 log = logging.getLogger("adblock")
@@ -50,6 +50,7 @@ DEFAULT_LISTS = ",".join(
         "https://easylist.to/easylist/easyprivacy.txt",
         "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt",
         "https://big.oisd.nl/",
+        "https://ublockorigin.github.io/uAssets/filters/badware.txt",
         str(Path(__file__).resolve().with_name("first-party.txt")),
     ]
 )
@@ -173,7 +174,7 @@ def _patch_csp(value: str, nonce: str) -> str:
 
 class AdBlock:
     def __init__(self) -> None:
-        self.engine: adblock.Engine | None = None
+        self.engine: Engine | None = None
         self.loaded_at = 0.0
         self._lock = threading.Lock()
         self._reloading = False
@@ -206,11 +207,13 @@ class AdBlock:
         url = flow.request.pretty_url
         self._filter_url(flow, engine, url)
 
-    def _filter_url(self, flow: http.HTTPFlow, engine: adblock.Engine,
-                    url: str, redirect: bool = False) -> bool:
+    def _filter_url(self, flow: http.HTTPFlow, engine: Engine,
+                    url: str, redirect_method: str | None = None) -> bool:
         try:
             rtype = _request_type(flow.request, url)
-            res = engine.check_network_urls(url, _source_url(flow.request, url, rtype), rtype)
+            res = engine.check_network_urls(
+                url, _source_url(flow.request, url, rtype), rtype, redirect_method or flow.request.method
+            )
         except Exception as e:  # malformed URL etc.
             log.debug("check failed for %s: %s", url, e)
             return False
@@ -222,7 +225,7 @@ class AdBlock:
             log.info("blocked [%s] %s  (%s)", rtype, url, res.filter)
 
         # $redirect= rules resolve to data: URLs when resources are loaded.
-        if not redirect and res.redirect and res.redirect.startswith("data:"):
+        if redirect_method is None and res.redirect and res.redirect.startswith("data:"):
             ctype, body = self._decode_data_url(res.redirect)
             flow.response = http.Response.make(200, body, {"content-type": ctype})
         elif rtype in ("document", "subdocument"):
@@ -271,8 +274,8 @@ class AdBlock:
             # One rule per selector: a single invalid selector would otherwise
             # void the whole combined rule.
             css_parts.extend(f"{s}{{display:none!important}}" for s in sorted(selectors))
-        for sel, styles in (cos.style_selectors or {}).items():
-            css_parts.append(f"{sel}{{{';'.join(styles)}}}")
+        for selector, style in cos.style_rules:
+            css_parts.append(f"{selector}{{{style}}}")
         script = cos.injected_script or ""
         if not css_parts and not script:
             return
@@ -293,7 +296,7 @@ class AdBlock:
         resp.set_text(html)
         self.stats["pages_injected"] += 1
 
-    def _filter_redirect(self, flow: http.HTTPFlow, engine: adblock.Engine) -> None:
+    def _filter_redirect(self, flow: http.HTTPFlow, engine: Engine) -> None:
         locations = flow.response.headers.get_all("location")
         if len(locations) != 1 or not locations[0].strip():
             return
@@ -304,7 +307,11 @@ class AdBlock:
                 return
         except ValueError:
             return
-        if self._filter_url(flow, engine, target, redirect=True):
+        status = flow.response.status_code
+        method = flow.request.method
+        if (status == 303 and method != "HEAD") or (status in {301, 302} and method == "POST"):
+            method = "GET"
+        if self._filter_url(flow, engine, target, redirect_method=method):
             flow.metadata["adblock_redirect"] = True
 
     def done(self) -> None:
@@ -352,19 +359,17 @@ class AdBlock:
     def _build_engine(self, force: bool = False) -> None:
         try:
             cache = Path(os.path.expanduser(ctx.options.adblock_cache_dir))
-            fs = adblock.FilterSet(debug=True)  # debug=True keeps rule text for logs
-            n = 0
+            lists = []
             for src in ctx.options.adblock_lists.split(","):
                 text = self._fetch(src, cache, force)
                 if text:
-                    fs.add_filter_list(text, format="standard")
-                    n += 1
+                    lists.append(text)
             t0 = time.time()
-            engine = adblock.Engine(filter_set=fs, optimize=True)
+            engine = Engine(lists)
             with self._lock:
                 self.engine = engine
                 self.loaded_at = time.time()
-            log.info("adblock engine ready: %d list(s), built in %.2fs", n, time.time() - t0)
+            log.info("adblock engine ready: %d list(s), built in %.2fs", len(lists), time.time() - t0)
         finally:
             self._reloading = False
 
