@@ -1,17 +1,20 @@
 # mitm-adblock
 
-An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
+An addon for [mitmproxy](https://mitmproxy.org) focused on intrusive advertising
+and everyday browsing annoyances. The project prioritizes first-party and
+third-party ads, pop-ups and pop-unders, ad redirects, and page clutter while
+keeping legitimate content and site features usable. It uses Brave's
 [adblock-rust](https://github.com/brave/adblock-rust) engine.
 
 - Network blocking with ABP/uBO-syntax lists, HTTP redirects, and HTML responses with explicit HTTP `Refresh` targets
+- Bundled [first-party rules](first-party.txt) for confirmed publisher-hosted ad endpoints
+- Cosmetic filtering of matched overlays, sponsored cards, and other page elements
 - EasyList, EasyPrivacy,
   [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
   [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
   [OISD Big](https://oisd.nl/setup/adblockplus),
   [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt),
   and [URLhaus Online](https://github.com/curbengh/urlhaus-filter) enabled by default
-- Bundled [first-party rules](first-party.txt) for confirmed publisher-hosted ad endpoints
-- Cosmetic filtering: element-hiding CSS injected into HTML, with CSP nonces handled
 - Lists cached in `~/.cache/mitm-adblock` and refreshed every 24 hours
 
 ## Usage
@@ -64,7 +67,8 @@ with their original query parameters, including when a list contains `$removepar
 
 ## ThreatFox
 
-Mount a file containing the [ThreatFox authentication key](https://threatfox.abuse.ch/export/)
+Threat reputation lists provide supplemental protection. To enable ThreatFox,
+mount a file containing the [ThreatFox authentication key](https://threatfox.abuse.ch/export/)
 readable by the proxy user. Set `ADBLOCK_THREATFOX_KEY_FILE` to its path inside
 the container or pass `--set adblock_threatfox_key_file=/path/to/key`.
 The proxy adds reported dedicated C2 and payload-delivery domains with a
@@ -85,9 +89,10 @@ format-specific filtering.
 
 ## Stress testing
 
-Replay archived ad traffic and check reported malvertising indicators in an
-offline gVisor sandbox. See the [stress testing runbook](stress/README.md) for
-the disposable Proxmox VM setup, public starter corpus, and capture format.
+Replay real browsing captures in an offline gVisor sandbox. Prioritize ads,
+redirects, and cosmetic rules alongside checks that legitimate requests still
+work. See the [stress testing runbook](stress/README.md) for the disposable
+Proxmox VM setup, public starter corpus, and optional historical campaign probes.
 
 Size the production container for list compilation and refresh as well as steady
 traffic. The [measured memory requirements](stress/README.md#size-the-sandbox-for-the-workload)

@@ -1,6 +1,17 @@
+# Project scope
+
+Prioritize intrusive advertising and everyday browsing annoyances. Focus on
+first-party ads, pop-ups and pop-unders, ad redirects, overlays, and clutter
+left behind by blocked ads. Preserve legitimate page content and interactions.
+
+Use real publisher captures to verify improvements. Check both the intrusive
+behavior and the page functionality that should still work. Treat historical
+threat indicator probes as supplemental coverage. Active malware campaign
+investigation belongs in dedicated security tooling.
+
 # Stress testing
 
-Spin up a fresh disposable Proxmox VE VM before running the malvertising stress
+Spin up a fresh disposable Proxmox VE VM before running the advertising stress
 suite. Follow [the stress runbook](stress/README.md). Stage the image, gVisor,
 filter lists, and captures, then disconnect the VM's virtual NIC before replay.
 
