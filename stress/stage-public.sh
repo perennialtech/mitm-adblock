@@ -28,6 +28,7 @@ download() {
 
 download https://easylist.to/easylist/easylist.txt easylist.txt 8388608
 download https://easylist.to/easylist/easyprivacy.txt easyprivacy.txt 8388608
+download https://filters.adtidy.org/extension/ublock/filters/2_without_easylist.txt adguard-base.txt 8388608
 download https://secure.fanboy.co.nz/fanboy-annoyance.txt annoyances.txt 8388608
 download https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt tif-full.txt 67108864
 download https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt popupads.txt 4194304

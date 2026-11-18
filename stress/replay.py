@@ -120,9 +120,10 @@ def make_addon():
     addon.load(SimpleNamespace(add_option=opts.add_option))
     ctx.options = opts
     rules = sorted(path for path in INPUT.glob("*.txt") if path.name != THREAT_DOMAINS)
+    subscriptions = [f"supplement:{path}" if path.name == "adguard-base.txt" else str(path) for path in rules]
     domains = INPUT / THREAT_DOMAINS
     opts.update(
-        adblock_lists=",".join(str(path) for path in rules),
+        adblock_lists=",".join(subscriptions),
         adblock_cache_dir="/unused",
         adblock_update_hours=0,
         adblock_threat_domains_file=str(domains) if domains.exists() else "",

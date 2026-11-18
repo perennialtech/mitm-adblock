@@ -48,6 +48,7 @@ docker build -t mitm-adblock:stress .
 ```
 
 The staging script downloads EasyList, EasyPrivacy,
+the [AdGuard Base supplement](https://github.com/AdguardTeam/AdGuardFilters),
 [Fanboy’s Annoyance List](https://easylist.to/#fanboys-annoyance-list),
 [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
 [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
@@ -59,6 +60,8 @@ from their publishers. The starter corpus uses three checksum-pinned publisher
 captures. Keep the resulting directory to rerun with the same filter and
 capture snapshots. Omit `--with-ranked-scans` for the pinned publisher tests
 alone. Replay performs no downloads.
+The replay loads `adguard-base.txt` with the same supplement precedence as the
+proxy defaults.
 
 The [WebSci ad-blocking study download](https://gvrkiran.github.io/adblock/)
 supplies a real advertising-heavy HAR with hundreds of requests, trackers,

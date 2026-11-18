@@ -50,6 +50,8 @@ from threatfox import MAX_AGE_SECONDS, ThreatFoxSnapshot, exact_url_key, fetch_s
 log = logging.getLogger("adblock")
 
 ANNOYANCES = "https://secure.fanboy.co.nz/fanboy-annoyance.txt"
+SUPPLEMENT_PREFIX = "supplement:"
+ADGUARD_BASE = "https://filters.adtidy.org/extension/ublock/filters/2_without_easylist.txt"
 TIF_FULL = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt"
 TIF_MEDIUM = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt"
 
@@ -57,6 +59,7 @@ DEFAULT_LISTS = ",".join(
     [
         "https://easylist.to/easylist/easylist.txt",
         "https://easylist.to/easylist/easyprivacy.txt",
+        SUPPLEMENT_PREFIX + ADGUARD_BASE,
         ANNOYANCES,
         TIF_FULL,
         "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt",
@@ -295,15 +298,26 @@ def _document_head(html: str) -> _DocumentHead | None:
 
 
 class FilterEngine:
-    def __init__(self, compiled: Engine, payload_urls: dict[str, int]) -> None:
+    def __init__(self, compiled: Engine, payload_urls: dict[str, int],
+                 supplement: Engine | None = None) -> None:
         self.compiled = compiled
         self.payload_urls = payload_urls
+        self.supplement = supplement
 
     def matches_payload_url(self, url: str) -> bool:
         if not self.payload_urls:
             return False
         expiry = self.payload_urls.get(exact_url_key(url), 0)
         return expiry > 0 and expiry > time.time()
+
+    def check_network_urls(self, url: str, source_url: str, rtype: str, method: str):
+        primary = self.compiled.check_network_urls(
+            url, source_url, rtype, method, self.matches_payload_url(url),
+            check_exceptions=self.supplement is not None,
+        )
+        if self.supplement is None or primary.matched or primary.excepted:
+            return primary
+        return self.supplement.check_network_urls(url, source_url, rtype, method)
 
 
 class AdBlock:
@@ -358,9 +372,8 @@ class AdBlock:
                 # Redirects preserve the request destination. Use the target extension
                 # only when we could not infer a more specific type from the request.
                 rtype = _request_type(flow.request, url)
-            res = engine.compiled.check_network_urls(
+            res = engine.check_network_urls(
                 url, _source_url(flow.request, url, rtype), rtype, redirect_method or flow.request.method,
-                engine.matches_payload_url(url),
             )
         except Exception as e:  # malformed URL etc.
             log.debug("check failed for %s: %s", url, e)
@@ -451,19 +464,27 @@ class AdBlock:
 
     @staticmethod
     def _stylesheet(engine: FilterEngine, url: str, html: str) -> str:
-        cos = engine.compiled.url_cosmetic_resources(url)
-        selectors = set(cos.hide_selectors)
-        if not cos.generichide:
+        primary = engine.compiled.url_cosmetic_resources(url)
+        selectors = set(primary.hide_selectors)
+        styles = list(primary.style_rules)
+        supplement = engine.supplement
+        extra = supplement.url_cosmetic_resources(url) if supplement is not None else None
+        if extra is not None:
+            selectors.update(extra.hide_selectors - primary.exceptions)
+            styles.extend(rule for rule in extra.style_rules if rule[0] not in primary.exceptions)
+        if not primary.generichide:
             classes = list(_attr_tokens(CLASS_RE, html, split=True))
             ids = list(_attr_tokens(ID_RE, html, split=False))
-            selectors.update(engine.compiled.hidden_class_id_selectors(classes, ids, cos.exceptions))
+            selectors.update(engine.compiled.hidden_class_id_selectors(classes, ids, primary.exceptions))
+            if extra is not None and not extra.generichide:
+                selectors.update(supplement.hidden_class_id_selectors(classes, ids, extra.exceptions | primary.exceptions))
 
         css_parts = []
         if selectors:
             # One rule per selector: a single invalid selector would otherwise
             # void the whole combined rule.
             css_parts.extend(f"{s}{{display:none!important}}" for s in sorted(selectors))
-        for selector, style in cos.style_rules:
+        for selector, style in dict.fromkeys(styles):
             css_parts.append(f"{selector}{{{style}}}")
         # CSS from subscriptions is embedded in an HTML raw-text element.
         # A literal closing tag must never become active HTML.
@@ -592,7 +613,11 @@ class AdBlock:
         try:
             cache = Path(os.path.expanduser(ctx.options.adblock_cache_dir))
             lists = []
+            supplements = []
             for src in ctx.options.adblock_lists.split(","):
+                src = src.strip()
+                supplemental = src.startswith(SUPPLEMENT_PREFIX)
+                src = src.removeprefix(SUPPLEMENT_PREFIX).strip()
                 text = self._fetch(src, cache, force)
                 if not text and src.strip() == TIF_FULL:
                     previous = _cached_list(cache, TIF_MEDIUM)
@@ -601,7 +626,7 @@ class AdBlock:
                         if text:
                             log.warning("TIF Full unavailable; using the previous TIF Medium cache")
                 if text:
-                    lists.append(text)
+                    (supplements if supplemental else lists).append(text)
             threatfox = self._threatfox(cache, force)
             domains = threatfox.domains
             local_domains = ctx.options.adblock_threat_domains_file
@@ -612,12 +637,14 @@ class AdBlock:
                 except (OSError, UnicodeError) as error:
                     log.warning("Could not read local threat domains (%s)", type(error).__name__)
             t0 = time.time()
-            engine = FilterEngine(Engine(lists, domains), threatfox.payload_urls)
+            supplement = Engine(supplements) if supplements else None
+            engine = FilterEngine(Engine(lists, domains), threatfox.payload_urls, supplement)
             with self._lock:
                 self.engine = engine
                 self.loaded_at = time.time()
-            log.info("adblock engine ready: %d list(s), %d exact threat domains, %d exact payload URLs, built in %.2fs",
-                     len(lists), len(domains), len(threatfox.payload_urls), time.time() - t0)
+            log.info("adblock engine ready: %d list(s), %d supplements, %d exact threat domains, "
+                     "%d exact payload URLs, built in %.2fs",
+                     len(lists), len(supplements), len(domains), len(threatfox.payload_urls), time.time() - t0)
         finally:
             self._reloading = False
 

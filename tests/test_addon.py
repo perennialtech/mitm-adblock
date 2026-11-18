@@ -58,6 +58,46 @@ class AdBlockTests(unittest.TestCase):
         self.assertIsNone(flow.response)
         self.assertEqual(flow.request.url, url)
 
+    def test_supplement_preserves_primary_decisions(self):
+        supplemental = self.rules.with_name("supplement.txt")
+        self.rules.write_text("||ads.test/old.js\n@@||site.test/player.js\n", encoding="utf-8")
+        supplemental.write_text(
+            "@@||ads.test/old.js\n||ads.test/old.js$badfilter\n"
+            "||site.test/player.js\n||site.test/ad-sdk/\n@@||site.test/ad-sdk/player.js\n",
+            encoding="utf-8",
+        )
+        ctx.options.update(adblock_lists=f"{self.rules},supplement:{supplemental}")
+        self.addon.configure({"adblock_lists"})
+        for url, blocked in (
+            ("https://ads.test/old.js", True),
+            ("https://site.test/player.js", False),
+            ("https://site.test/ad-sdk/prebid.js", True),
+            ("https://site.test/ad-sdk/player.js", False),
+        ):
+            with self.subTest(url=url):
+                flow = flow_for(url)
+                flow.request.headers["Sec-Fetch-Dest"] = "script"
+                self.addon.request(flow)
+                self.assertEqual(flow.response is not None, blocked)
+
+    def test_supplement_respects_primary_cosmetic_exception(self):
+        supplemental = self.rules.with_name("supplement.txt")
+        self.rules.write_text("site.test##.current-ad\nsite.test#@#.control\n", encoding="utf-8")
+        supplemental.write_text(
+            "site.test#@#.current-ad\nsite.test##.control\nsite.test##.new-ad\n",
+            encoding="utf-8",
+        )
+        ctx.options.update(adblock_lists=f"{self.rules},supplement:{supplemental}")
+        self.addon.configure({"adblock_lists"})
+        flow = flow_for("https://site.test/")
+        flow.response = http.Response.make(200, b"<html><head></head><body></body></html>",
+                                           {"content-type": "text/html"})
+        self.addon.response(flow)
+        css = flow.response.get_text()
+        self.assertIn(".current-ad{display:none!important}", css)
+        self.assertIn(".new-ad{display:none!important}", css)
+        self.assertNotIn(".control{display:none!important}", css)
+
     def test_redirect_uses_followup_method(self):
         self.load_rules("||page.test/landing^$document,method=get")
         for status in (303, 307):
