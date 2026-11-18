@@ -3,12 +3,17 @@ set -euo pipefail
 umask 077
 
 with_campaigns=false
-if [[ ${1:-} == --with-campaigns ]]; then
-    with_campaigns=true
+with_ranked_scans=false
+while (( $# )); do
+    case "$1" in
+        --with-campaigns) with_campaigns=true ;;
+        --with-ranked-scans) with_ranked_scans=true ;;
+        *) break ;;
+    esac
     shift
-fi
+done
 if (( $# > 1 )) || [[ ${1:-} == -* ]]; then
-    printf 'Usage: %s [--with-campaigns] [new corpus directory]\n' "$0" >&2
+    printf 'Usage: %s [--with-campaigns] [--with-ranked-scans] [new corpus directory]\n' "$0" >&2
     exit 2
 fi
 destination=${1:-stress-corpus}
@@ -63,7 +68,10 @@ c3fdfa2c133e57ca97cf0fff835b7f3ed114539ac3801a53c9fde2250233727d  pushpaganda.cs
 SUMS
     )
 fi
-cp -- "$here/nytimes.labels.json" "$here/pcgamer.labels.json" "$stage/"
+cp -- "$here/nytimes.labels.json" "$here/pcgamer.labels.json" "$here/pcgamer.clicks.json" "$stage/"
+if [[ $with_ranked_scans == true ]]; then
+    python3 "$here/ranked-scans.py" "$stage"
+fi
 mv -T --no-clobber -- "$stage" "$destination"
 if [[ -d "$stage" ]]; then
     printf 'Corpus destination already exists. Choose a new directory.\n' >&2
