@@ -106,6 +106,13 @@ def _request_type(req: http.Request, url: str) -> str:
     h = req.headers
     if h.get("upgrade", "").lower() == "websocket":
         return "websocket"
+    # Hyperlink auditing uses an empty Fetch destination, just like an XHR.
+    if (
+        req.method == "POST"
+        and h.get("content-type", "").partition(";")[0].strip().lower() == "text/ping"
+        and h.get("ping-to")
+    ):
+        return "ping"
     dest = h.get("sec-fetch-dest", "").lower()
     if dest in DEST_TO_TYPE:
         return DEST_TO_TYPE[dest]
@@ -126,7 +133,13 @@ def _request_type(req: http.Request, url: str) -> str:
 def _source_url(req: http.Request, url: str, rtype: str) -> str:
     if rtype == "document":
         return url
-    return req.headers.get("referer") or req.headers.get("origin") or url
+    source = req.headers.get("referer") or req.headers.get("origin")
+    if source:
+        return source
+    # Fetch Metadata can establish cross-site context without identifying the source.
+    if req.headers.get("sec-fetch-site", "").lower() == "cross-site":
+        return ""
+    return url
 
 
 def _attr_tokens(regex: re.Pattern, html: str, split: bool) -> set[str]:
@@ -210,7 +223,11 @@ class AdBlock:
     def _filter_url(self, flow: http.HTTPFlow, engine: Engine,
                     url: str, redirect_method: str | None = None) -> bool:
         try:
-            rtype = _request_type(flow.request, url)
+            rtype = _request_type(flow.request, flow.request.pretty_url)
+            if redirect_method is not None and rtype == "other":
+                # Redirects preserve the request destination. Use the target extension
+                # only when we could not infer a more specific type from the request.
+                rtype = _request_type(flow.request, url)
             res = engine.check_network_urls(
                 url, _source_url(flow.request, url, rtype), rtype, redirect_method or flow.request.method
             )

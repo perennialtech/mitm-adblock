@@ -61,6 +61,50 @@ class AdBlockTests(unittest.TestCase):
                 self.addon.response(flow)
                 self.assertEqual(flow.response.status_code, 403 if status == 303 else status)
 
+    def test_cross_site_request_without_referrer(self):
+        self.load_rules(
+            "||target.test/third-party.js^$script,third-party",
+            "||target.test/scoped.js^$script,domain=publisher.test",
+        )
+        for path, site, expected_status in (
+            ("third-party.js", "cross-site", 204),
+            ("third-party.js", "same-site", None),
+            ("scoped.js", "cross-site", None),
+        ):
+            with self.subTest(path=path, site=site):
+                flow = flow_for(f"https://target.test/{path}")
+                flow.request.headers["Sec-Fetch-Dest"] = "script"
+                flow.request.headers["Sec-Fetch-Site"] = site
+                self.addon.request(flow)
+                self.assertEqual(flow.response.status_code if flow.response else None, expected_status)
+
+    def test_hyperlink_auditing_ping_and_ordinary_post(self):
+        self.load_rules("||target.test/link^$ping,third-party")
+        for content_type, expected_status in (("text/ping", 204), ("application/json", None)):
+            with self.subTest(content_type=content_type):
+                flow = flow_for("https://target.test/link", method="POST")
+                flow.request.headers.update({
+                    "Content-Type": content_type,
+                    "Ping-To": "https://destination.test/",
+                    "Sec-Fetch-Dest": "empty",
+                    "Sec-Fetch-Site": "cross-site",
+                })
+                self.addon.request(flow)
+                self.assertEqual(flow.response.status_code if flow.response else None, expected_status)
+
+    def test_redirect_preserves_inferred_request_type(self):
+        self.load_rules("||target.test/relay.html^$script")
+        flow = flow_for("https://page.test/asset.js")
+        del flow.request.headers["Sec-Fetch-Dest"]
+        self.addon.request(flow)
+        self.assertIsNone(flow.response)
+        flow.response = http.Response.make(
+            302, b"", {"Location": "https://target.test/relay.html"}
+        )
+        self.addon.response(flow)
+        self.assertEqual(flow.response.status_code, 204)
+        self.assertIn("adblock_redirect", flow.metadata)
+
     def test_cosmetic_styles_and_exceptions(self):
         self.load_rules(
             "##.generic-ad",
