@@ -1,11 +1,12 @@
-# Offline malvertising stress testing
+# Offline advertising stress testing
 
 The suite passes recorded HTTP requests and responses through the production ad
-blocker's request and response hooks. It checks request blocking, recorded
-redirect responses, and cosmetic rewrites of captured HTML. Capture contents
+blocker's request and response hooks. Its main checks cover first-party and
+third-party ad requests, unwanted redirects, cosmetic filtering of captured
+HTML, and legitimate publisher requests that should pass. Capture contents
 stay as data inside an offline sandbox. The suite measures the addon at the
-HTTP flow level. Browser rendering, JavaScript, push permission prompts, and
-TLS, TCP, and QUIC interception are outside its coverage.
+HTTP flow level. Evaluate browser rendering, script execution, permission
+prompts, and transport interception with separate checks.
 
 ## Prepare a disposable Proxmox VE VM
 
@@ -49,19 +50,40 @@ The staging script downloads EasyList, EasyPrivacy,
 [OISD Big](https://oisd.nl/setup/adblockplus),
 [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt), and
 [URLhaus Online](https://github.com/curbengh/urlhaus-filter)
-from their publishers, copies the bundled first-party rules, and fetches four
-checksum-pinned public data sources. Keep the resulting directory
+from their publishers and copies the bundled first-party rules. The default
+corpus uses one checksum-pinned publisher capture. Keep the resulting directory
 to rerun with the same filter snapshots. The workload performs no downloads.
 
-- The [WebSci ad-blocking study download](https://gvrkiran.github.io/adblock/)
-  supplies a real advertising-heavy HAR with hundreds of requests, trackers,
-  ad auctions, and redirects. The starter expectations check its publisher
-  document, ad viewability beacon, ad auction request, ad redirects, and
-  first-party ad and tracking endpoints. A recorded first-party account data
-  request is an allow control. The capture omits HTTP headers and response
-  bodies. Its recorded MIME type
-  identifies HTML responses and its HAR `redirectURL` supplies the target of a
-  redirect when the recorded Location header is unavailable.
+The [WebSci ad-blocking study download](https://gvrkiran.github.io/adblock/)
+supplies a real advertising-heavy HAR with hundreds of requests, trackers,
+ad auctions, and redirects. The starter expectations check its publisher
+document, ad viewability beacon, ad auction request, ad redirects, and
+first-party ad and tracking endpoints. A recorded first-party account data
+request is an allow control. The capture omits HTTP headers and response
+bodies. Its recorded MIME type identifies HTML responses and its HAR
+`redirectURL` supplies the target of a redirect when the recorded Location
+header is unavailable.
+
+Once the guest NIC is disconnected, run:
+
+```sh
+python3 stress/run.py --check
+python3 stress/run.py ./stress-corpus --repeat 20 > stress-report.json
+```
+
+### Optional historical campaign probes
+
+To stage the publisher capture with three additional checksum-pinned campaign
+samples, run during guest setup:
+
+```sh
+./stress/stage-public.sh --with-campaigns ./stress-corpus-with-campaigns
+```
+
+Campaign scores describe direct document requests to published historical
+hostnames. Use them as supplemental list diagnostics. Use the publisher
+expectations and allow controls to judge changes to ad and annoyance filtering.
+
 - [HUMAN Satori's Pushpaganda investigation](https://www.humansecurity.com/learn/resources/satori-threat-intelligence-alert-pushpaganda-manipulates-google-discovery-feeds-with-ai-generated-content-to-spread-malicious-notifications/)
   supplies campaign domains involved in malicious push advertising. The
   runner checks each domain as an offline document request.
@@ -72,19 +94,10 @@ to rerun with the same filter snapshots. The workload performs no downloads.
   supplies tech-support scam infrastructure. The probe uses only indicators
   classified as malicious domains and checks the specific published hostnames,
   including individual tenants on shared hosting.
-- The Badware Risks check probes bare document URLs for hostname-only `$all`
-  rules from the downloaded feed and reports results as `badware_all_rules`.
-  This measures how the configured engine applies the feed to navigations.
-  The three independently published campaign lists measure domain-level
-  coverage. Reported indicators are historical observations, and the probes
-  represent direct document requests.
 
-Once the guest NIC is disconnected, run:
-
-```sh
-python3 stress/run.py --check
-python3 stress/run.py ./stress-corpus --repeat 20 > stress-report.json
-```
+When the Badware Risks snapshot is present, the runner also probes its
+hostname-only `$all` rules and reports them as `badware_all_rules`. This
+checks how the engine applies the configured feed to navigations.
 
 ### Size the sandbox for the workload
 
@@ -127,15 +140,15 @@ failing capture entry numbers. It contains no URLs, filter text, headers, or
 response bodies. Counts include all repetitions unless the field is `entries`
 or `document_probes`.
 
-## Add higher-severity captures
+## Add intrusive advertising captures
 
 Use genuine archived, sanitized HARs with bodies for meaningful cosmetic
-coverage. Include intact visits and post-click or redirect captures from
-documented abusive campaigns, such as pop-unders, fake play buttons, push
-notification bait, scareware redirects, and deceptive download landings. Use
-an independent label for the ad delivery request or redirect to block and a
-publisher request to allow. For cosmetic filtering, label a captured HTML
-document with a known hide rule as `inject`. Keep the original HTTP context,
+coverage. Collect ordinary page visits and relevant clicks that show
+publisher-hosted ads, pop-unders, fake play buttons, notification bait, or
+ad overlays. Record the requests and redirects associated with each
+annoyance and label the legitimate publisher content or interaction that
+should still work. For cosmetic filtering, label a captured HTML document
+with a known hide rule as `inject`. Keep the original HTTP context,
 including Referer, Sec-Fetch-Dest, response Content-Type, and CSP when available.
 Remove authentication material and personal data before staging. For more
 real ad traffic and first-party controls, the
