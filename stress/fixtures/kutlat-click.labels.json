@@ -1,0 +1,5 @@
+{
+  "0": {"expect": "allow", "family": "publisher_document"},
+  "1": {"expect": "allow", "family": "publisher_gate_script"},
+  "2": {"expect": "block", "family": "affiliate_ad_navigation"}
+}

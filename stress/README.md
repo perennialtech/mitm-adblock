@@ -52,9 +52,10 @@ The staging script downloads EasyList, EasyPrivacy,
 [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
 [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
 [OISD Big](https://oisd.nl/setup/adblockplus),
+[Peter Lowe’s Ad and Tracking Server List](https://pgl.yoyo.org/adservers/),
 [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt), and
 [URLhaus Online](https://github.com/curbengh/urlhaus-filter)
-from their publishers. The starter corpus uses two checksum-pinned publisher
+from their publishers. The starter corpus uses three checksum-pinned publisher
 captures. Keep the resulting directory to rerun with the same filter and
 capture snapshots. Omit `--with-ranked-scans` for the pinned publisher tests
 alone. Replay performs no downloads.
@@ -121,7 +122,18 @@ python3 stress/run.py --clicks ./stress-corpus > click-report.json
 
 The pinned PC Gamer capture supplies an allow control. Its actual About Us
 link opens a new window and the article list remains visible on the opener.
-For a positive ad case, collect or import a sanitized, full HAR from an
+
+The pinned KutLat capture supplies an unwanted-window case. It includes the
+publisher HTML, its original first-party click handler, and the initial
+affiliate navigation recorded after a real Chromium click on “Click to
+continue.” The VM intercepted the request locally. The HAR omits the affiliate
+response, cookies and POST data, and the publisher HTML has its anonymous form
+token stripped. The HTTP replay checks that the page and its script load and
+the affiliate navigation is blocked. The browser replay also checks that the
+publisher stays visible and records whether the browser still opens a tab.
+[Original AdGuard report](https://github.com/AdguardTeam/AdguardFilters/issues/243111)
+
+To add another ad case, collect or import a sanitized, full HAR from an
 isolated browser session that recorded a normal click and the extra window
 it triggered. Keep any live recording in a separate disposable guest on an
 isolated network and use a fresh browser profile. Use a context-wide HAR
@@ -223,7 +235,8 @@ resident.
 The 1,536 MiB default provides headroom above the measured rebuild for list
 growth and concurrent work. Account for the rebuild and normal traffic when
 sizing a persistent proxy. Measure captures with large response bodies
-separately. The starter corpus contains one captured HTML body.
+separately. The starter corpus includes two captured HTML documents and the
+KutLat click handler.
 
 To size a new workload, use a disconnected guest with enough memory to
 complete the run. Measure `memory.peak`, `pids.peak` where available, and
@@ -260,7 +273,7 @@ the size limits below.
 
 Keep the corpus directory flat. It requires `easylist.txt`, `easyprivacy.txt`,
 and supports `tif-full.txt`, `tif-medium.txt`, `popupads.txt`, `annoyances.txt`,
-`oisd-big.txt`,
+`oisd-big.txt`, `peter-lowe.txt`,
 `badware.txt`, and `urlhaus-online.txt` filter snapshots. For an offline ThreatFox comparison, add
 a locally prepared `threat-domains.txt` hostname snapshot of up to 8 MiB. Use one HaGeZi tier per profile. It accepts
 up to 32 uncompressed `*.har` files, optional `<capture>.labels.json` and
@@ -268,7 +281,7 @@ up to 32 uncompressed `*.har` files, optional `<capture>.labels.json` and
 and `pushpaganda.csv`, `trapdoor.csv`, and `help-tds.csv`. Each campaign may
 have up to 5,000 CSV rows. The size limits are 32 MiB per HAR, 8 MiB each for
 EasyList, EasyPrivacy, and Fanboy’s Annoyance List, 64 MiB for TIF Full, and 16 MiB each for TIF Medium
-and OISD, 4 MiB for Pop-Up Ads, and 32 MiB for URLhaus Online. The Badware Risks list, each sidecar, and each
+and OISD, 4 MiB for Pop-Up Ads, and 32 MiB for URLhaus Online. The Badware Risks and Peter Lowe lists, each sidecar, and each
 campaign CSV can be up to 1 MiB. The total corpus can be up to 128 MiB and
 expectations can use up to 64 distinct families. Split larger corpora into batches. The entry count times
 the repeat count is limited to 100,000 per run.

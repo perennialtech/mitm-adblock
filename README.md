@@ -13,6 +13,7 @@ keeping legitimate content and site features usable. It uses Brave's
   [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
   [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
   [OISD Big](https://oisd.nl/setup/adblockplus),
+  [Peter Lowe’s Ad and Tracking Server List](https://pgl.yoyo.org/adservers/),
   [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt),
   and [URLhaus Online](https://github.com/curbengh/urlhaus-filter) enabled by default
 - Lists cached in `~/.cache/mitm-adblock` and refreshed every 24 hours
@@ -53,7 +54,7 @@ shown in the web interface.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `adblock_lists` | EasyList, EasyPrivacy, Fanboy’s Annoyance List, HaGeZi TIF Full, HaGeZi Pop-Up Ads, OISD Big, uBlock Origin Badware Risks, URLhaus Online | Comma-separated URLs and/or local paths |
+| `adblock_lists` | EasyList, EasyPrivacy, Fanboy’s Annoyance List, HaGeZi TIF Full, HaGeZi Pop-Up Ads, OISD Big, Peter Lowe’s Ad and Tracking Server List, uBlock Origin Badware Risks, URLhaus Online | Comma-separated URLs and/or local paths |
 | `adblock_cache_dir` | `~/.cache/mitm-adblock` | Where downloaded lists are cached |
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
@@ -64,6 +65,8 @@ shown in the web interface.
 
 Setting `adblock_lists` replaces the defaults. The proxy forwards allowed URLs
 with their original query parameters, including when a list contains `$removeparam` rules.
+The default subscriptions block dedicated affiliate redirect hosts listed by
+Peter Lowe, including direct visits to those redirect hosts.
 
 ## ThreatFox
 

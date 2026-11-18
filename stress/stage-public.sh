@@ -32,6 +32,7 @@ download https://secure.fanboy.co.nz/fanboy-annoyance.txt annoyances.txt 8388608
 download https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt tif-full.txt 67108864
 download https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt popupads.txt 4194304
 download https://big.oisd.nl/ oisd-big.txt 16777216
+download "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&mimetype=plaintext" peter-lowe.txt 1048576
 download https://ublockorigin.github.io/uAssets/filters/badware.txt badware.txt 1048576
 download https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-online.txt urlhaus-online.txt 33554432
 download https://gvrkiran.github.io/adblock/nytimes.com.json nytimes.har 33554432
@@ -69,6 +70,14 @@ SUMS
     )
 fi
 cp -- "$here/nytimes.labels.json" "$here/pcgamer.labels.json" "$here/pcgamer.clicks.json" "$stage/"
+# The publisher HTML and script were captured before recording the click in a NIC-less VM.
+cp -- "$here/fixtures/"{kutlat-click.har,kutlat-click.labels.json,kutlat-click.clicks.json} "$stage/"
+(
+    cd -- "$stage"
+    sha256sum --strict --check <<'SUMS'
+5e9092d1544666cf50fb4ba4020f2ac4580afc0990e0be0621ac17e339d8f7d0  kutlat-click.har
+SUMS
+)
 if [[ $with_ranked_scans == true ]]; then
     python3 "$here/ranked-scans.py" "$stage"
 fi

@@ -25,6 +25,7 @@ OPTIONAL_RULES = {
     "popupads.txt": 4 * MIB,
     "annoyances.txt": 8 * MIB,
     "oisd-big.txt": 16 * MIB,
+    "peter-lowe.txt": MIB,
     "badware.txt": MIB,
     "threat-domains.txt": 8 * MIB,
     "urlhaus-online.txt": 32 * MIB,

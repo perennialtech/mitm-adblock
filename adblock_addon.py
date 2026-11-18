@@ -61,6 +61,7 @@ DEFAULT_LISTS = ",".join(
         TIF_FULL,
         "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt",
         "https://big.oisd.nl/",
+        "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&mimetype=plaintext",
         "https://ublockorigin.github.io/uAssets/filters/badware.txt",
         "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-online.txt",
     ]
