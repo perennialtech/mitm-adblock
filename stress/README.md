@@ -41,7 +41,9 @@ docker build -t mitm-adblock:stress .
 ./stress/stage-public.sh ./stress-corpus
 ```
 
-The staging script downloads EasyList and EasyPrivacy from their publisher and
+The staging script downloads EasyList, EasyPrivacy, and
+[HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium)
+from their publishers and
 fetches two checksum-pinned public data sources. Keep the resulting directory
 to rerun with the same filter snapshots. The workload performs no downloads.
 
@@ -89,10 +91,13 @@ real ad traffic and first-party controls, the
 offers raw desktop and mobile browser HARs. Select individual captures within
 the size limits below.
 
-Keep the corpus directory flat. It accepts `easylist.txt`, `easyprivacy.txt`,
+Keep the corpus directory flat. It requires `easylist.txt`, `easyprivacy.txt`,
+and supports the optional `tif-medium.txt` filter snapshot for comparison with
+the two-list baseline. It accepts
 up to 32 uncompressed `*.har` files, optional `<capture>.labels.json` sidecars,
-and the optional `pushpaganda.csv`. Each HAR can be up to 32 MiB, each filter
-list up to 8 MiB, and each sidecar or CSV up to 1 MiB. The total corpus can be
+and the optional `pushpaganda.csv`. Each HAR can be up to 32 MiB, each EasyList
+or EasyPrivacy snapshot up to 8 MiB, the threat list up to 16 MiB, and each
+sidecar or CSV up to 1 MiB. The total corpus can be
 up to 128 MiB and expectations can use up to 64 distinct families. Split larger corpora into batches. The entry count times
 the repeat count is limited to 100,000 per run.
 

@@ -3,7 +3,8 @@
 An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
 [adblock-rust](https://github.com/brave/adblock-rust) engine.
 
-- Network blocking with ABP/uBO-syntax lists (EasyList + EasyPrivacy by default), including HTTP redirect destinations
+- Network blocking with ABP/uBO-syntax lists and checks on HTTP redirect destinations
+- EasyList, EasyPrivacy, and [HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium) enabled by default
 - Cosmetic filtering: element-hiding CSS injected into HTML, with CSP nonces handled
 - Lists cached in `~/.cache/mitm-adblock` and refreshed every 24 hours
 
@@ -42,13 +43,14 @@ shown in the web interface.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `adblock_lists` | EasyList, EasyPrivacy | Comma-separated URLs and/or local paths |
+| `adblock_lists` | EasyList, EasyPrivacy, HaGeZi TIF Medium | Comma-separated URLs and/or local paths |
 | `adblock_cache_dir` | `~/.cache/mitm-adblock` | Where downloaded lists are cached |
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
 | `adblock_log_blocked` | `false` | Log every blocked request |
 
 To allow a site, add a rule like `@@||example.com^$document` to your own rules file.
+Setting `adblock_lists` replaces the defaults.
 
 ## Stress testing
 
