@@ -26,6 +26,7 @@ CAMPAIGNS = {
 }
 MAX_CAMPAIGN_ROWS = 5_000
 BADWARE = "badware.txt"
+THREAT_DOMAINS = "threat-domains.txt"
 FAMILY = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
 DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 
@@ -84,15 +85,19 @@ def make_addon():
     opts = options.Options()
     addon.load(SimpleNamespace(add_option=opts.add_option))
     ctx.options = opts
-    rules = sorted(INPUT.glob("*.txt"))
+    rules = sorted(path for path in INPUT.glob("*.txt") if path.name != THREAT_DOMAINS)
+    domains = INPUT / THREAT_DOMAINS
     opts.update(
         adblock_lists=",".join(str(path) for path in rules),
         adblock_cache_dir="/unused",
         adblock_update_hours=0,
+        adblock_threat_domains_file=str(domains) if domains.exists() else "",
     )
     addon.configure({"adblock_lists", "adblock_cache_dir"})
     if addon.engine is None:
         raise CorpusError("The ad-block engine did not initialize.")
+    if domains.exists():
+        rules.append(domains)
     return addon, {rule.name: digest(rule) for rule in rules}
 
 

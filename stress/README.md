@@ -46,8 +46,9 @@ docker build -t mitm-adblock:stress .
 The staging script downloads EasyList, EasyPrivacy,
 [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
 [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
-[OISD Big](https://oisd.nl/setup/adblockplus), and
-[uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt)
+[OISD Big](https://oisd.nl/setup/adblockplus),
+[uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt), and
+[URLhaus Online](https://github.com/curbengh/urlhaus-filter)
 from their publishers, copies the bundled first-party rules, and fetches four
 checksum-pinned public data sources. Keep the resulting directory
 to rerun with the same filter snapshots. The workload performs no downloads.
@@ -144,12 +145,13 @@ the size limits below.
 
 Keep the corpus directory flat. It requires `easylist.txt`, `easyprivacy.txt`,
 and supports `tif-full.txt`, `tif-medium.txt`, `popupads.txt`, `first-party.txt`, `oisd-big.txt`,
-and `badware.txt` filter snapshots. Use one HaGeZi tier per profile. It accepts
+`badware.txt`, and `urlhaus-online.txt` filter snapshots. For an offline ThreatFox comparison, add
+a locally prepared `threat-domains.txt` hostname snapshot of up to 8 MiB. Use one HaGeZi tier per profile. It accepts
 up to 32 uncompressed `*.har` files, optional `<capture>.labels.json` sidecars,
 and `pushpaganda.csv`, `trapdoor.csv`, and `help-tds.csv`. Each campaign may
 have up to 5,000 CSV rows. The size limits are 32 MiB per HAR, 8 MiB each for
 EasyList and EasyPrivacy, 64 MiB for TIF Full, and 16 MiB each for TIF Medium
-and OISD, and 4 MiB for Pop-Up Ads. The first-party and Badware Risks lists, each sidecar, and each
+and OISD, 4 MiB for Pop-Up Ads, and 32 MiB for URLhaus Online. The first-party and Badware Risks lists, each sidecar, and each
 campaign CSV can be up to 1 MiB. The total corpus can be up to 128 MiB and
 expectations can use up to 64 distinct families. Split larger corpora into batches. The entry count times
 the repeat count is limited to 100,000 per run.
