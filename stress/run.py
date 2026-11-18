@@ -26,6 +26,7 @@ OPTIONAL_RULES = {
     "oisd-big.txt": 16 * MIB,
     "badware.txt": MIB,
     "threat-domains.txt": 8 * MIB,
+    "urlhaus-online.txt": 32 * MIB,
 }
 CAMPAIGNS = {"pushpaganda.csv", "trapdoor.csv", "help-tds.csv"}
 CAPTURE_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,90}\.har")

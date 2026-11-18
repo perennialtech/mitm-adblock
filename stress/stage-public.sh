@@ -22,6 +22,7 @@ download https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/ti
 download https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt popupads.txt 4194304
 download https://big.oisd.nl/ oisd-big.txt 16777216
 download https://ublockorigin.github.io/uAssets/filters/badware.txt badware.txt 1048576
+download https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-online.txt urlhaus-online.txt 33554432
 download https://gvrkiran.github.io/adblock/nytimes.com.json nytimes.har 33554432
 download https://humanprod.wpenginepowered.com/wp-content/uploads/4-26-Pushpaganda-Domain-list.csv pushpaganda.csv 1048576
 download https://humanprod.wpenginepowered.com/wp-content/uploads/Trapdoor-C2-Domains.csv trapdoor.csv 1048576

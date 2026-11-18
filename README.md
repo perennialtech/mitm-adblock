@@ -7,9 +7,9 @@ An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
 - EasyList, EasyPrivacy,
   [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
   [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
-  [OISD Big](https://oisd.nl/setup/adblockplus), and
-  [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt)
-  enabled by default
+  [OISD Big](https://oisd.nl/setup/adblockplus),
+  [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt),
+  and [URLhaus Online](https://github.com/curbengh/urlhaus-filter) enabled by default
 - Bundled [first-party rules](first-party.txt) for confirmed publisher-hosted ad endpoints
 - Cosmetic filtering: element-hiding CSS injected into HTML, with CSP nonces handled
 - Lists cached in `~/.cache/mitm-adblock` and refreshed every 24 hours
@@ -50,7 +50,7 @@ shown in the web interface.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `adblock_lists` | EasyList, EasyPrivacy, HaGeZi TIF Full, HaGeZi Pop-Up Ads, OISD Big, uBlock Origin Badware Risks, bundled first-party rules | Comma-separated URLs and/or local paths |
+| `adblock_lists` | EasyList, EasyPrivacy, HaGeZi TIF Full, HaGeZi Pop-Up Ads, OISD Big, uBlock Origin Badware Risks, URLhaus Online, bundled first-party rules | Comma-separated URLs and/or local paths |
 | `adblock_cache_dir` | `~/.cache/mitm-adblock` | Where downloaded lists are cached |
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
