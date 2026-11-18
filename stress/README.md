@@ -43,8 +43,9 @@ docker build -t mitm-adblock:stress .
 ./stress/stage-public.sh ./stress-corpus
 ```
 
-The staging script downloads EasyList, EasyPrivacy, and
-[HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium)
+The staging script downloads EasyList, EasyPrivacy,
+[HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium),
+and [OISD Big](https://oisd.nl/setup/adblockplus)
 from their publishers, copies the bundled first-party rules, and fetches two
 checksum-pinned public data sources. Keep the resulting directory
 to rerun with the same filter snapshots. The workload performs no downloads.
@@ -85,8 +86,8 @@ with 2 vCPUs and 4 GiB RAM. Each profile replayed the 316-entry publisher HAR
 
 | Filter profile | Peak cgroup RAM | Peak cgroup tasks | Replay elapsed |
 |---|---:|---:|---:|
-| Starter | 626 MiB | 31 | 14.0 s |
-| Starter + OISD Big | 872 MiB | 29 | 14.5 s |
+| EasyList, EasyPrivacy, HaGeZi TIF Medium, and first-party rules | 626 MiB | 31 | 14.0 s |
+| All default lists, including OISD Big | 872 MiB | 29 | 14.5 s |
 
 The memory default leaves 664 MiB above the higher measured peak for growth
 in list snapshots and more expensive captures. The starter HAR omits response
@@ -97,21 +98,6 @@ complete the run. Measure `memory.peak`, `pids.peak` where available, and
 `cpu.stat` from the container's cgroup or a dedicated parent cgroup. Use the
 run's elapsed time and leave headroom for input variation and runtime
 overhead. [Linux cgroup v2 counters](https://docs.kernel.org/admin-guide/cgroup-v2.html)
-
-For a comparison with [OISD Big](https://oisd.nl/setup/adblockplus), download
-the ABP snapshot as `oisd-big.txt` into a separate copy of the corpus during
-trusted staging:
-
-```sh
-cp -a ./stress-corpus ./stress-corpus-with-oisd
-curl -qfsS --proto '=https' --max-time 60 --max-filesize 16777216 \
-  --output ./stress-corpus-with-oisd/oisd-big.txt https://big.oisd.nl/
-```
-
-For the OISD comparison, set entry 228 in the copied `nytimes.labels.json`
-to expect `stop_redirect`. OISD can block that hop at the initial request.
-After disconnecting the NIC, replay the copied corpus with
-`python3 stress/run.py ./stress-corpus-with-oisd --repeat 20`.
 
 `--check` starts the hardened container without a corpus. An unavailable
 runtime or invalid input fails the command. Replay exits 1 on a label mismatch

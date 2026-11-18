@@ -19,6 +19,7 @@ download() {
 download https://easylist.to/easylist/easylist.txt easylist.txt 8388608
 download https://easylist.to/easylist/easyprivacy.txt easyprivacy.txt 8388608
 download https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt tif-medium.txt 16777216
+download https://big.oisd.nl/ oisd-big.txt 16777216
 download https://gvrkiran.github.io/adblock/nytimes.com.json nytimes.har 33554432
 download https://humanprod.wpenginepowered.com/wp-content/uploads/4-26-Pushpaganda-Domain-list.csv pushpaganda.csv 1048576
 (

@@ -8,5 +8,6 @@
   "131": {"expect": "block", "family": "ad_redirect"},
   "140": {"expect": "block", "family": "first_party_ads"},
   "165": {"expect": "block", "family": "first_party_ads"},
-  "228": {"expect": "block_redirect", "family": "ad_redirect_destination"}
+  "228": {"expect": "stop_redirect", "family": "ad_redirect"},
+  "230": {"expect": "block_redirect", "family": "ad_redirect_destination"}
 }
