@@ -49,3 +49,9 @@ shown in the web interface.
 | `adblock_log_blocked` | `false` | Log every blocked request |
 
 To allow a site, add a rule like `@@||example.com^$document` to your own rules file.
+
+## Stress testing
+
+Replay archived ad traffic and check reported malvertising indicators in an
+offline gVisor sandbox. See the [stress testing runbook](stress/README.md) for
+the disposable Proxmox VM setup, public starter corpus, and capture format.

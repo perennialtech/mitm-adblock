@@ -1,0 +1,6 @@
+{
+  "5": {"expect": "allow", "family": "publisher_document"},
+  "9": {"expect": "block", "family": "ad_viewability"},
+  "103": {"expect": "block", "family": "ad_auction"},
+  "131": {"expect": "block", "family": "ad_redirect"}
+}
