@@ -42,7 +42,7 @@ def labels_for(path, entry_count):
         if str(index) != ordinal or not 0 <= index < entry_count:
             raise CorpusError("A label points outside the HAR.")
         if (
-            label["expect"] not in {"block", "block_redirect", "allow", "inject"}
+            label["expect"] not in {"block", "block_redirect", "stop_redirect", "allow", "inject"}
             or not FAMILY.fullmatch(label["family"])
         ):
             raise CorpusError("Invalid expectation or family in labels.")
@@ -154,7 +154,8 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
             counts["replayed"] += 1
             counts["requests_without_headers"] += not bool(entry["request"]["headers"])
             counts["blocked" if blocked else "allowed"] += 1
-            if 300 <= recorded_status < 400 and recorded_status != 304:
+            recorded_redirect = 300 <= recorded_status < 400 and recorded_status != 304
+            if recorded_redirect:
                 counts["recorded_redirects"] += 1
                 counts["blocked_redirects"] += blocked or blocked_destination
                 counts["blocked_redirect_destinations"] += blocked_destination
@@ -170,7 +171,11 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
                 else:
                     actual = "inject" if injected else "allow"
                 # A permitted page can also receive cosmetic filtering.
-                matched = expected == actual or (expected == "allow" and actual == "inject")
+                matched = (
+                    expected == actual
+                    or (expected == "allow" and actual == "inject")
+                    or (expected == "stop_redirect" and recorded_redirect and (blocked or blocked_destination))
+                )
                 families[label["family"]]["checked"] += 1
                 families[label["family"]]["missed"] += not matched
                 counts["expectation_misses"] += not matched
@@ -235,12 +240,12 @@ def main():
     # Keep untrusted headers, URLs, response bodies, rule text and parser
     # exceptions out of stderr and the portable report.
     logging.disable(logging.CRITICAL)
-    signal.alarm(115)
+    signal.alarm(int(sys.argv[2]))
     try:
         interfaces = {name for _, name in socket.if_nameindex()}
         if os.geteuid() != 10001 or interfaces - {"lo"}:
             raise CorpusError("Sandbox preflight failed.")
-        if sys.argv[2:] == ["--check"]:
+        if sys.argv[3:] == ["--check"]:
             report, status = {"isolation_check": "passed", "interfaces": sorted(interfaces)}, 0
         else:
             report, status = replay(int(sys.argv[1]))
