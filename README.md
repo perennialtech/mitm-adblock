@@ -9,7 +9,9 @@ keeping legitimate content and site features usable. It uses Brave's
 - Network blocking with ABP/uBO-syntax lists, HTTP redirects, and HTML responses with explicit HTTP `Refresh` targets
 - Cosmetic filtering of matched overlays, sponsored cards, and leftover ad placements
 - Removal of Safari Smart App Banner metadata from top-level pages
-- EasyList, EasyPrivacy, [Fanboy's Annoyance List](https://easylist.to/#fanboys-annoyance-list),
+- EasyList, EasyPrivacy,
+  [AdGuard Base supplement](https://github.com/AdguardTeam/AdGuardFilters) (the upstream edition without bundled EasyList),
+  [Fanboy's Annoyance List](https://easylist.to/#fanboys-annoyance-list),
   [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
   [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
   [OISD Big](https://oisd.nl/setup/adblockplus),
@@ -54,7 +56,7 @@ shown in the web interface.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `adblock_lists` | EasyList, EasyPrivacy, Fanboy’s Annoyance List, HaGeZi TIF Full, HaGeZi Pop-Up Ads, OISD Big, Peter Lowe’s Ad and Tracking Server List, uBlock Origin Badware Risks, URLhaus Online | Comma-separated URLs and/or local paths |
+| `adblock_lists` | EasyList, EasyPrivacy, AdGuard Base supplement, Fanboy’s Annoyance List, HaGeZi TIF Full, HaGeZi Pop-Up Ads, OISD Big, Peter Lowe’s Ad and Tracking Server List, uBlock Origin Badware Risks, URLhaus Online | Comma-separated URLs and/or local paths |
 | `adblock_cache_dir` | `~/.cache/mitm-adblock` | Where downloaded lists are cached |
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
@@ -65,6 +67,9 @@ shown in the web interface.
 
 Setting `adblock_lists` replaces the defaults. The proxy forwards allowed URLs
 with their original query parameters, including when a list contains `$removeparam` rules.
+The default AdGuard Base subscription uses the `supplement:` prefix. A
+supplement adds coverage after the primary lists' blocks and exceptions. Its
+exceptions and `$badfilter` rules apply within the supplement.
 The default subscriptions block dedicated affiliate redirect hosts listed by
 Peter Lowe, including direct visits to those redirect hosts.
 

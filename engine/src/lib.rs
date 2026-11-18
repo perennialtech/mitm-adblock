@@ -15,6 +15,7 @@ struct Engine {
 #[pyclass(get_all)]
 struct NetworkResult {
     matched: bool,
+    excepted: bool,
     filter: Option<String>,
     redirect: Option<String>,
 }
@@ -45,7 +46,7 @@ impl Engine {
         })
     }
 
-    #[pyo3(signature = (url, source_url, request_type, method, exact_payload_url=false))]
+    #[pyo3(signature = (url, source_url, request_type, method, exact_payload_url=false, check_exceptions=false))]
     fn check_network_urls(
         &self,
         url: &str,
@@ -53,21 +54,22 @@ impl Engine {
         request_type: &str,
         method: &str,
         exact_payload_url: bool,
+        check_exceptions: bool,
     ) -> PyResult<NetworkResult> {
         let request = Request::new(url, source_url, request_type, method)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
         let found_host = self
             .threat_domains
             .contains(request.hostname.trim_end_matches('.'));
-        let result = if found_host || exact_payload_url {
-            // An exact threat match is an ordinary blocking rule. Let the
-            // same engine evaluate its exceptions and important rules.
-            self.inner
-                .check_network_request_subset(&request, true, false)
-        } else {
-            self.inner.check_network_request(&request)
-        };
+        // An exact threat match is an ordinary blocking rule. Evaluate its
+        // exceptions and important rules in the same engine.
+        let result = self.inner.check_network_request_subset(
+            &request,
+            found_host || exact_payload_url,
+            check_exceptions,
+        );
         let matched = result.should_block();
+        let excepted = result.exception.is_some();
         let filter = result.filter.and_then(|rule| rule.raw_line).or_else(|| {
             if !matched {
                 None
@@ -80,6 +82,7 @@ impl Engine {
         // Deliberately leave rewritten_url out of the proxy-facing result.
         Ok(NetworkResult {
             matched,
+            excepted,
             filter,
             redirect: result.redirect,
         })

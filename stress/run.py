@@ -20,6 +20,7 @@ from pathlib import Path
 MIB = 1024 * 1024
 RULES = {"easylist.txt", "easyprivacy.txt"}
 OPTIONAL_RULES = {
+    "adguard-base.txt": 8 * MIB,
     "tif-medium.txt": 16 * MIB,
     "tif-full.txt": 64 * MIB,
     "popupads.txt": 4 * MIB,
