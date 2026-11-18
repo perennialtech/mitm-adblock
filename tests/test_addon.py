@@ -3,10 +3,11 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from mitmproxy import connection, ctx, http, options
 
-from adblock_addon import AdBlock
+from adblock_addon import AdBlock, TIF_FULL, TIF_MEDIUM, _cached_list
 
 
 def flow_for(url, method="GET"):
@@ -104,6 +105,16 @@ class AdBlockTests(unittest.TestCase):
         self.addon.response(flow)
         self.assertEqual(flow.response.status_code, 204)
         self.assertIn("adblock_redirect", flow.metadata)
+
+    def test_unavailable_tif_full_can_use_previous_medium_snapshot(self):
+        cache = self.rules.parent
+        _cached_list(cache, TIF_MEDIUM).write_text("||known-threat.test^$all", encoding="utf-8")
+        ctx.options.update(adblock_lists=TIF_FULL, adblock_cache_dir=str(cache))
+        with patch.object(self.addon, "_fetch", return_value=None):
+            self.addon.configure({"adblock_lists"})
+        flow = flow_for("https://known-threat.test/")
+        self.addon.request(flow)
+        self.assertEqual(flow.response.status_code, 403)
 
     def test_cosmetic_styles_and_exceptions(self):
         self.load_rules(

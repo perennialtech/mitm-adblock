@@ -44,11 +44,15 @@ from mitmproxy import ctx, http
 
 log = logging.getLogger("adblock")
 
+TIF_FULL = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt"
+TIF_MEDIUM = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt"
+
 DEFAULT_LISTS = ",".join(
     [
         "https://easylist.to/easylist/easylist.txt",
         "https://easylist.to/easylist/easyprivacy.txt",
-        "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt",
+        TIF_FULL,
+        "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt",
         "https://big.oisd.nl/",
         "https://ublockorigin.github.io/uAssets/filters/badware.txt",
         str(Path(__file__).resolve().with_name("first-party.txt")),
@@ -140,6 +144,10 @@ def _source_url(req: http.Request, url: str, rtype: str) -> str:
     if req.headers.get("sec-fetch-site", "").lower() == "cross-site":
         return ""
     return url
+
+
+def _cached_list(cache: Path, source: str) -> Path:
+    return cache / (hashlib.sha1(source.encode()).hexdigest()[:16] + ".txt")
 
 
 def _attr_tokens(regex: re.Pattern, html: str, split: bool) -> set[str]:
@@ -354,7 +362,7 @@ class AdBlock:
             return p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
 
         cache.mkdir(parents=True, exist_ok=True)
-        f = cache / (hashlib.sha1(src.encode()).hexdigest()[:16] + ".txt")
+        f = _cached_list(cache, src)
         max_age = ctx.options.adblock_update_hours * 3600
         fresh = f.exists() and (time.time() - f.stat().st_mtime) < max_age
         if fresh and not force:
@@ -379,6 +387,12 @@ class AdBlock:
             lists = []
             for src in ctx.options.adblock_lists.split(","):
                 text = self._fetch(src, cache, force)
+                if not text and src.strip() == TIF_FULL:
+                    previous = _cached_list(cache, TIF_MEDIUM)
+                    if previous.is_file():
+                        text = previous.read_text(encoding="utf-8", errors="replace")
+                        if text:
+                            log.warning("TIF Full unavailable; using the previous TIF Medium cache")
                 if text:
                     lists.append(text)
             t0 = time.time()
