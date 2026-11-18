@@ -44,10 +44,11 @@ docker build -t mitm-adblock:stress .
 ```
 
 The staging script downloads EasyList, EasyPrivacy,
-[HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium),
+[HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
+[HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
 [OISD Big](https://oisd.nl/setup/adblockplus), and
 [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt)
-from their publishers, copies the bundled first-party rules, and fetches two
+from their publishers, copies the bundled first-party rules, and fetches four
 checksum-pinned public data sources. Keep the resulting directory
 to rerun with the same filter snapshots. The workload performs no downloads.
 
@@ -62,12 +63,20 @@ to rerun with the same filter snapshots. The workload performs no downloads.
   redirect when the recorded Location header is unavailable.
 - [HUMAN Satori's Pushpaganda investigation](https://www.humansecurity.com/learn/resources/satori-threat-intelligence-alert-pushpaganda-manipulates-google-discovery-feeds-with-ai-generated-content-to-spread-malicious-notifications/)
   supplies campaign domains involved in malicious push advertising. The
-  runner checks each domain as an offline document request and reports those
-  results independently. These indicators provide domain-level coverage.
+  runner checks each domain as an offline document request.
+- [HUMAN Satori's Trapdoor investigation](https://www.humansecurity.com/learn/resources/satori-threat-intelligence-alert-trapdoor-funnels-malvertising-into-ad-fraud/)
+  supplies command-and-control hostnames. The report shows how many of these
+  hostnames the engine blocks on direct document requests.
+- [Infoblox's Help TDS investigation](https://www.infoblox.com/blog/threat-intelligence/2026/10/inside-help-tds-hotejka-cloudflare-pages-and-predictive-detection)
+  supplies tech-support scam infrastructure. The probe uses only indicators
+  classified as malicious domains and checks the specific published hostnames,
+  including individual tenants on shared hosting.
 - The Badware Risks check probes bare document URLs for hostname-only `$all`
   rules from the downloaded feed and reports results as `badware_all_rules`.
   This measures how the configured engine applies the feed to navigations.
-  The separately sourced Pushpaganda indicators measure campaign coverage.
+  The three independently published campaign lists measure domain-level
+  coverage. Reported indicators are historical observations, and the probes
+  represent direct document requests.
 
 Once the guest NIC is disconnected, run:
 
@@ -85,19 +94,21 @@ or slower guests, size these budgets for the full run and keep the same
 corpus and expectations. An OOM kill or a timeout fails the run as a
 capacity error and names the configured budget.
 
-These workloads were measured under gVisor in a disconnected Proxmox guest
-with 2 vCPUs and 4 GiB RAM. Both builds used the same six list snapshots,
-including Badware Risks, and replayed the 316-entry publisher HAR 100 times
-under a one-core quota.
+Measured under gVisor in disconnected Proxmox guests with 2 vCPUs and 4 GiB
+RAM. The proxy startup runs loaded the cached default lists and served local
+HTTP probes. The rebuild measured compilation with the previous engine still
+resident.
 
-| Build | Peak cgroup RAM | Peak cgroup tasks | Replay elapsed |
-|---|---:|---:|---:|
-| Previous Python binding | 883 MiB | 30 | 15.1 s |
-| adblock-rust 0.13.6 | 221 MiB | 29 | 12.4 s |
+| List profile and workload | Peak cgroup RAM |
+|---|---:|
+| Previous defaults with TIF Medium, proxy startup | 251 MiB |
+| TIF Full and Pop-Up Ads defaults, proxy startup | 647 MiB |
+| TIF Full and Pop-Up Ads defaults, offline engine rebuild | 771 MiB |
 
-The 1,536 MiB default provides headroom for larger list snapshots and captures.
-The starter HAR omits response bodies. Measure workloads with large response
-bodies separately.
+The 1,536 MiB default provides headroom above the measured rebuild for list
+growth and concurrent work. Account for the rebuild and normal traffic when
+sizing a persistent proxy. Measure captures with large response bodies
+separately. The starter HAR omits response bodies.
 
 To size a new workload, use a disconnected guest with enough memory to
 complete the run. Measure `memory.peak`, `pids.peak` where available, and
@@ -132,14 +143,15 @@ offers raw desktop and mobile browser HARs. Select individual captures within
 the size limits below.
 
 Keep the corpus directory flat. It requires `easylist.txt`, `easyprivacy.txt`,
-and supports optional `tif-medium.txt`, `first-party.txt`, `oisd-big.txt`, and `badware.txt`
-filter snapshots. It accepts
+and supports `tif-full.txt`, `tif-medium.txt`, `popupads.txt`, `first-party.txt`, `oisd-big.txt`,
+and `badware.txt` filter snapshots. Use one HaGeZi tier per profile. It accepts
 up to 32 uncompressed `*.har` files, optional `<capture>.labels.json` sidecars,
-and the optional `pushpaganda.csv`. Each HAR can be up to 32 MiB, each EasyList
-or EasyPrivacy snapshot up to 8 MiB, and each HaGeZi or OISD snapshot up to
-16 MiB. The first-party and Badware Risks lists, each sidecar, and the CSV can be up to 1 MiB
-each. The total corpus can be up to 128 MiB and expectations can use up to 64
-distinct families. Split larger corpora into batches. The entry count times
+and `pushpaganda.csv`, `trapdoor.csv`, and `help-tds.csv`. Each campaign may
+have up to 5,000 CSV rows. The size limits are 32 MiB per HAR, 8 MiB each for
+EasyList and EasyPrivacy, 64 MiB for TIF Full, and 16 MiB each for TIF Medium
+and OISD, and 4 MiB for Pop-Up Ads. The first-party and Badware Risks lists, each sidecar, and each
+campaign CSV can be up to 1 MiB. The total corpus can be up to 128 MiB and
+expectations can use up to 64 distinct families. Split larger corpora into batches. The entry count times
 the repeat count is limited to 100,000 per run.
 
 For a capture named `popunder.har`, `popunder.labels.json` uses zero-based

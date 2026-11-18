@@ -44,11 +44,15 @@ from mitmproxy import ctx, http
 
 log = logging.getLogger("adblock")
 
+TIF_FULL = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt"
+TIF_MEDIUM = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt"
+
 DEFAULT_LISTS = ",".join(
     [
         "https://easylist.to/easylist/easylist.txt",
         "https://easylist.to/easylist/easyprivacy.txt",
-        "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt",
+        TIF_FULL,
+        "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt",
         "https://big.oisd.nl/",
         "https://ublockorigin.github.io/uAssets/filters/badware.txt",
         str(Path(__file__).resolve().with_name("first-party.txt")),
@@ -106,6 +110,13 @@ def _request_type(req: http.Request, url: str) -> str:
     h = req.headers
     if h.get("upgrade", "").lower() == "websocket":
         return "websocket"
+    # Hyperlink auditing uses an empty Fetch destination, just like an XHR.
+    if (
+        req.method == "POST"
+        and h.get("content-type", "").partition(";")[0].strip().lower() == "text/ping"
+        and h.get("ping-to")
+    ):
+        return "ping"
     dest = h.get("sec-fetch-dest", "").lower()
     if dest in DEST_TO_TYPE:
         return DEST_TO_TYPE[dest]
@@ -126,7 +137,17 @@ def _request_type(req: http.Request, url: str) -> str:
 def _source_url(req: http.Request, url: str, rtype: str) -> str:
     if rtype == "document":
         return url
-    return req.headers.get("referer") or req.headers.get("origin") or url
+    source = req.headers.get("referer") or req.headers.get("origin")
+    if source:
+        return source
+    # Fetch Metadata can establish cross-site context without identifying the source.
+    if req.headers.get("sec-fetch-site", "").lower() == "cross-site":
+        return ""
+    return url
+
+
+def _cached_list(cache: Path, source: str) -> Path:
+    return cache / (hashlib.sha1(source.encode()).hexdigest()[:16] + ".txt")
 
 
 def _attr_tokens(regex: re.Pattern, html: str, split: bool) -> set[str]:
@@ -210,7 +231,11 @@ class AdBlock:
     def _filter_url(self, flow: http.HTTPFlow, engine: Engine,
                     url: str, redirect_method: str | None = None) -> bool:
         try:
-            rtype = _request_type(flow.request, url)
+            rtype = _request_type(flow.request, flow.request.pretty_url)
+            if redirect_method is not None and rtype == "other":
+                # Redirects preserve the request destination. Use the target extension
+                # only when we could not infer a more specific type from the request.
+                rtype = _request_type(flow.request, url)
             res = engine.check_network_urls(
                 url, _source_url(flow.request, url, rtype), rtype, redirect_method or flow.request.method
             )
@@ -337,7 +362,7 @@ class AdBlock:
             return p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
 
         cache.mkdir(parents=True, exist_ok=True)
-        f = cache / (hashlib.sha1(src.encode()).hexdigest()[:16] + ".txt")
+        f = _cached_list(cache, src)
         max_age = ctx.options.adblock_update_hours * 3600
         fresh = f.exists() and (time.time() - f.stat().st_mtime) < max_age
         if fresh and not force:
@@ -362,6 +387,12 @@ class AdBlock:
             lists = []
             for src in ctx.options.adblock_lists.split(","):
                 text = self._fetch(src, cache, force)
+                if not text and src.strip() == TIF_FULL:
+                    previous = _cached_list(cache, TIF_MEDIUM)
+                    if previous.is_file():
+                        text = previous.read_text(encoding="utf-8", errors="replace")
+                        if text:
+                            log.warning("TIF Full unavailable; using the previous TIF Medium cache")
                 if text:
                     lists.append(text)
             t0 = time.time()

@@ -4,7 +4,12 @@ An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
 [adblock-rust](https://github.com/brave/adblock-rust) engine.
 
 - Network blocking with ABP/uBO-syntax lists and checks on HTTP redirect destinations
-- EasyList, EasyPrivacy, [HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium), [OISD Big](https://oisd.nl/setup/adblockplus), and [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt) enabled by default
+- EasyList, EasyPrivacy,
+  [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
+  [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
+  [OISD Big](https://oisd.nl/setup/adblockplus), and
+  [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt)
+  enabled by default
 - Bundled [first-party rules](first-party.txt) for confirmed publisher-hosted ad endpoints
 - Cosmetic filtering: element-hiding CSS injected into HTML, with CSP nonces handled
 - Lists cached in `~/.cache/mitm-adblock` and refreshed every 24 hours
@@ -45,7 +50,7 @@ shown in the web interface.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `adblock_lists` | EasyList, EasyPrivacy, HaGeZi TIF Medium, OISD Big, uBlock Origin Badware Risks, bundled first-party rules | Comma-separated URLs and/or local paths |
+| `adblock_lists` | EasyList, EasyPrivacy, HaGeZi TIF Full, HaGeZi Pop-Up Ads, OISD Big, uBlock Origin Badware Risks, bundled first-party rules | Comma-separated URLs and/or local paths |
 | `adblock_cache_dir` | `~/.cache/mitm-adblock` | Where downloaded lists are cached |
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
@@ -68,3 +73,9 @@ format-specific filtering.
 Replay archived ad traffic and check reported malvertising indicators in an
 offline gVisor sandbox. See the [stress testing runbook](stress/README.md) for
 the disposable Proxmox VM setup, public starter corpus, and capture format.
+
+Size the production container for list compilation and refresh as well as steady
+traffic. The [measured memory requirements](stress/README.md#size-the-sandbox-for-the-workload)
+include a rebuild while the previous engine is still resident. Existing
+installations can use a cached TIF Medium snapshot when TIF Full and its cache
+are unavailable.

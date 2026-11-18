@@ -19,7 +19,12 @@ INPUT = Path("/replay")
 MAX_OPERATIONS = 100_000
 MAX_FINDINGS = 50
 MAX_FAMILIES = 64
-CAMPAIGN = "pushpaganda.csv"
+CAMPAIGNS = {
+    "pushpaganda": "pushpaganda.csv",
+    "trapdoor": "trapdoor.csv",
+    "help_tds": "help-tds.csv",
+}
+MAX_CAMPAIGN_ROWS = 5_000
 BADWARE = "badware.txt"
 FAMILY = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
 DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
@@ -188,7 +193,20 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
 def campaign_domains(path):
     with path.open(encoding="utf-8-sig", newline="") as stream:
         rows = list(csv.reader(stream))
-    if not 0 < len(rows) <= 1_000 or any(
+    if not 0 < len(rows) <= MAX_CAMPAIGN_ROWS:
+        raise CorpusError("Invalid campaign domain CSV.")
+    if path.name == CAMPAIGNS["trapdoor"]:
+        if rows.pop(0) != ["C2 Domain"]:
+            raise CorpusError("Invalid Trapdoor CSV header.")
+    if path.name == CAMPAIGNS["help_tds"]:
+        if rows.pop(0) != ["type", "indicator", "classification", "detected_date"]:
+            raise CorpusError("Invalid Help TDS CSV header.")
+        if any(len(row) != 4 for row in rows):
+            raise CorpusError("Invalid Help TDS CSV row.")
+        rows = [[indicator.replace("[.]", ".").lower()]
+                for kind, indicator, classification, _ in rows
+                if (kind, classification) == ("domain", "malicious")]
+    if not rows or any(
         len(row) != 1 or len(row[0]) > 253 or not DOMAIN.fullmatch(row[0]) for row in rows
     ):
         raise CorpusError("Invalid campaign domain CSV.")
@@ -234,9 +252,10 @@ def replay(repeat):
             raise CorpusError("The corpus exceeds 64 expectation families.")
         counts = run_capture(addon, name, entries, labels, repeat, timings, families, findings)
         results[name] = {**files, **counts}
-    campaign = INPUT / CAMPAIGN
-    if campaign.exists():
-        report["pushpaganda"] = probe_domains(addon, campaign, campaign_domains(campaign))
+    for name, filename in CAMPAIGNS.items():
+        campaign = INPUT / filename
+        if campaign.exists():
+            report[name] = probe_domains(addon, campaign, campaign_domains(campaign))
     badware = INPUT / BADWARE
     if badware.exists():
         report["badware_all_rules"] = probe_domains(addon, badware, badware_domains(badware))

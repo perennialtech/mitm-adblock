@@ -20,11 +20,13 @@ MIB = 1024 * 1024
 RULES = {"easylist.txt", "easyprivacy.txt"}
 OPTIONAL_RULES = {
     "tif-medium.txt": 16 * MIB,
+    "tif-full.txt": 64 * MIB,
+    "popupads.txt": 4 * MIB,
     "first-party.txt": MIB,
     "oisd-big.txt": 16 * MIB,
     "badware.txt": MIB,
 }
-INDICATORS = "pushpaganda.csv"
+CAMPAIGNS = {"pushpaganda.csv", "trapdoor.csv", "help-tds.csv"}
 CAPTURE_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,90}\.har")
 MAX_CAPTURES = 32
 MAX_REPORT = 128 * 1024
@@ -78,11 +80,11 @@ def copy_corpus(source, destination):
         with os.scandir(directory) as members:
             for member in members:
                 names.add(member.name)
-                if len(names) > 2 * MAX_CAPTURES + len(RULES) + len(OPTIONAL_RULES) + 1:
+                if len(names) > 2 * MAX_CAPTURES + len(RULES) + len(OPTIONAL_RULES) + len(CAMPAIGNS):
                     raise ValueError("The corpus contains too many files.")
         captures = {name for name in names if CAPTURE_NAME.fullmatch(name)}
         labels = {name.removesuffix(".har") + ".labels.json" for name in captures}
-        allowed = RULES | OPTIONAL_RULES.keys() | {INDICATORS} | captures | labels
+        allowed = RULES | OPTIONAL_RULES.keys() | CAMPAIGNS | captures | labels
         if not RULES <= names or not 1 <= len(captures) <= MAX_CAPTURES or names - allowed:
             raise ValueError("Corpus needs both base lists and 1–32 HARs, with optional filter lists, paired labels and campaign CSV.")
         limits = dict.fromkeys(captures, 32 * MIB)
