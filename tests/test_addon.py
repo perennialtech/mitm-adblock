@@ -116,6 +116,30 @@ class AdBlockTests(unittest.TestCase):
         self.addon.request(flow)
         self.assertEqual(flow.response.status_code, 403)
 
+    def test_followable_refresh_uses_get_without_rewriting_other_responses(self):
+        self.load_rules("/bounce^$document,method=get", "@@/continue^$document")
+        ctx.options.update(adblock_cosmetic=False)
+        for values, destination, expected in (
+            (["0; URL='/bounce'"], "document", 403),
+            (["0; URL='/bounce'"], "empty", 200),
+            (["5"], "document", 200),
+            (["0;url=/continue"], "document", 200),
+            (["0;url=about:blank"], "document", 200),
+            (["0;url=/bounce", "5"], "document", 200),
+        ):
+            with self.subTest(values=values, destination=destination):
+                flow = flow_for("https://page.test/start", method="POST")
+                flow.request.headers["Sec-Fetch-Dest"] = destination
+                flow.response = http.Response.make(200, b"publisher content", {"content-type": "text/html"})
+                flow.response.headers.set_all("refresh", values)
+                self.addon.response(flow)
+                self.assertEqual(flow.response.status_code, expected)
+                if expected == 200:
+                    self.assertEqual(flow.response.headers.get_all("refresh"), values)
+                    self.assertEqual(flow.response.raw_content, b"publisher content")
+                else:
+                    self.assertIn("adblock_refresh", flow.metadata)
+
     def test_cosmetic_styles_and_exceptions(self):
         self.load_rules(
             "##.generic-ad",

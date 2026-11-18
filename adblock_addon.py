@@ -99,6 +99,11 @@ ID_RE = re.compile(r"""\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
 HEAD_RE = re.compile(r"<head\b[^>]*>", re.I)
 HTML_RE = re.compile(r"<html\b[^>]*>", re.I)
 FOLLOWABLE_REDIRECTS = {301, 302, 303, 307, 308}
+REFRESH_TARGET = re.compile(
+    r"[ \t]*[0-9]+(?:\.[0-9]*)?[ \t]*[;,][ \t]*url[ \t]*=[ \t]*"
+    r"""(?:"([^"]+)"|'([^']+)'|([^ \t"']+))[ \t]*""",
+    re.IGNORECASE,
+)
 
 BLOCKED_PAGE = """<!doctype html><meta charset="utf-8"><title>Blocked</title>
 <body style="font:16px system-ui;margin:3em;color:#444">
@@ -144,6 +149,17 @@ def _source_url(req: http.Request, url: str, rtype: str) -> str:
     if req.headers.get("sec-fetch-site", "").lower() == "cross-site":
         return ""
     return url
+
+
+def _resolve_navigation(url: str, location: str) -> str | None:
+    try:
+        target = urllib.parse.urljoin(url, location.strip())
+        parts = urllib.parse.urlsplit(target)
+        if parts.scheme in {"http", "https"} and parts.hostname and parts.username is None:
+            return target
+    except ValueError:
+        pass
+    return None
 
 
 def _cached_list(cache: Path, source: str) -> Path:
@@ -272,12 +288,14 @@ class AdBlock:
         if resp.status_code in FOLLOWABLE_REDIRECTS:
             self._filter_redirect(flow, engine)
             return
-        if not ctx.options.adblock_cosmetic or resp.status_code != 200:
+        if resp.status_code != 200:
             return
         if "text/html" not in resp.headers.get("content-type", "").lower():
             return
         url = flow.request.pretty_url
         if _request_type(flow.request, url) not in ("document", "subdocument"):
+            return
+        if self._filter_refresh(flow, engine) or not ctx.options.adblock_cosmetic:
             return
 
         try:
@@ -325,12 +343,8 @@ class AdBlock:
         locations = flow.response.headers.get_all("location")
         if len(locations) != 1 or not locations[0].strip():
             return
-        try:
-            target = urllib.parse.urljoin(flow.request.pretty_url, locations[0].strip())
-            parts = urllib.parse.urlsplit(target)
-            if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username is not None:
-                return
-        except ValueError:
+        target = _resolve_navigation(flow.request.pretty_url, locations[0])
+        if target is None:
             return
         status = flow.response.status_code
         method = flow.request.method
@@ -338,6 +352,20 @@ class AdBlock:
             method = "GET"
         if self._filter_url(flow, engine, target, redirect_method=method):
             flow.metadata["adblock_redirect"] = True
+
+    def _filter_refresh(self, flow: http.HTTPFlow, engine: Engine) -> bool:
+        values = flow.response.headers.get_all("refresh")
+        if len(values) != 1:
+            return False
+        match = REFRESH_TARGET.fullmatch(values[0])
+        if not match:
+            return False
+        location = next(value for value in match.groups() if value is not None)
+        target = _resolve_navigation(flow.request.pretty_url, location)
+        if target is not None and self._filter_url(flow, engine, target, redirect_method="GET"):
+            flow.metadata["adblock_refresh"] = True
+            return True
+        return False
 
     def done(self) -> None:
         log.info("adblock stats: %s", self.stats)
