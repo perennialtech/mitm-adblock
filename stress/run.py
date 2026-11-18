@@ -22,7 +22,7 @@ OPTIONAL_RULES = {
     "tif-medium.txt": 16 * MIB,
     "tif-full.txt": 64 * MIB,
     "popupads.txt": 4 * MIB,
-    "first-party.txt": MIB,
+    "annoyances.txt": 8 * MIB,
     "oisd-big.txt": 16 * MIB,
     "badware.txt": MIB,
     "threat-domains.txt": 8 * MIB,

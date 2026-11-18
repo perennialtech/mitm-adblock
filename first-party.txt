@@ -1,6 +1,0 @@
-! Publisher-hosted advertisements with dedicated request paths.
-! Reproduced in the WebSci public capture from https://gvrkiran.github.io/adblock/
-||www.nytimes.com/adx/bin/adxrun.html^
-||www.nytimes.com/adx/bin/adxrun.html^$document
-||www.nytimes.com/adx/bin/clientside/
-||static01.nyt.com/bi/js/analytics/show_ads.js^

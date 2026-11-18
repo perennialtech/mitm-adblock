@@ -1,0 +1,7 @@
+{
+  "0": {
+    "expect": "inject",
+    "family": "newsletter_popup",
+    "css_contains": "#slice-container-newsletterForm-exitIntent{display:none!important}"
+  }
+}

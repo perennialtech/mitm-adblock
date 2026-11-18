@@ -28,6 +28,7 @@ MAX_CAMPAIGN_ROWS = 5_000
 BADWARE = "badware.txt"
 THREAT_DOMAINS = "threat-domains.txt"
 FAMILY = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+INJECTED_CSS = re.compile(r"<style data-mitm-adblock>(.*?)</style>", re.DOTALL)
 DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 
 
@@ -51,8 +52,14 @@ def labels_for(path, entry_count):
         if (
             label["expect"] not in {"block", "block_redirect", "stop_redirect", "allow", "inject"}
             or not FAMILY.fullmatch(label["family"])
+            or not isinstance(label.get("probe", False), bool)
         ):
             raise CorpusError("Invalid expectation or family in labels.")
+        fragment = label.get("css_contains")
+        if fragment is not None and (
+            label["expect"] != "inject" or not isinstance(fragment, str) or not 0 < len(fragment) <= 1024
+        ):
+            raise CorpusError("A CSS fragment needs an inject expectation and 1–1024 characters.")
     return {int(index): label for index, label in raw.items()}
 
 
@@ -156,6 +163,11 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
                     addon.stats["pages_injected"] > pages_before
                     and flow.response.raw_content != original_body
                 )
+                fragment = label.get("css_contains") if label else None
+                css_matched = fragment is None or (injected and any(
+                    fragment in match for match in
+                    INJECTED_CSS.findall(flow.response.get_text(strict=False) or "")
+                ))
             except Exception:
                 counts["errors"] += 1
                 if len(findings) < MAX_FINDINGS and iteration == 0:
@@ -183,15 +195,20 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
                     actual = "inject" if injected else "allow"
                 # A permitted page can also receive cosmetic filtering.
                 matched = (
-                    expected == actual
+                    (expected == actual and css_matched)
                     or (expected == "allow" and actual == "inject")
                     or (expected == "stop_redirect" and recorded_redirect and (blocked or blocked_destination))
                 )
                 families[label["family"]]["checked"] += 1
                 families[label["family"]]["missed"] += not matched
-                counts["expectation_misses"] += not matched
+                probe = label.get("probe", False)
+                counts["probe_misses" if probe else "expectation_misses"] += not matched
                 if not matched and len(findings) < MAX_FINDINGS and iteration == 0:
-                    findings.append({"capture": name, "entry": index, "expected": expected, "result": actual})
+                    finding = {"capture": name, "entry": index, "expected": expected,
+                               "result": "missing_css" if actual == "inject" and not css_matched else actual}
+                    if probe:
+                        finding["probe"] = True
+                    findings.append(finding)
     return dict(counts)
 
 

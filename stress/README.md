@@ -45,24 +45,33 @@ docker build -t mitm-adblock:stress .
 ```
 
 The staging script downloads EasyList, EasyPrivacy,
+[Fanboy’s Annoyance List](https://easylist.to/#fanboys-annoyance-list),
 [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
 [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
 [OISD Big](https://oisd.nl/setup/adblockplus),
 [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt), and
 [URLhaus Online](https://github.com/curbengh/urlhaus-filter)
-from their publishers and copies the bundled first-party rules. The default
-corpus uses one checksum-pinned publisher capture. Keep the resulting directory
-to rerun with the same filter snapshots. The workload performs no downloads.
+from their publishers. The default
+corpus uses two checksum-pinned publisher captures. Keep the resulting directory
+to rerun with the same filter snapshots. Stage a fresh corpus when updating
+from the older bundled site rules. The workload performs no downloads.
 
 The [WebSci ad-blocking study download](https://gvrkiran.github.io/adblock/)
 supplies a real advertising-heavy HAR with hundreds of requests, trackers,
 ad auctions, and redirects. The starter expectations check its publisher
 document, ad viewability beacon, ad auction request, ad redirects, and
 first-party ad and tracking endpoints. A recorded first-party account data
-request is an allow control. The capture omits HTTP headers and response
+request is an allow control. Three historical first-party ad requests remain
+coverage probes after the removal of the bundled site rules. The capture omits HTTP headers and response
 bodies. Its recorded MIME type identifies HTML responses and its HAR
 `redirectURL` supplies the target of a redirect when the recorded Location
 header is unavailable.
+
+The [October 2026 Common Crawl archive](https://www.commoncrawl.org/blog/october-2026-crawl-archive-now-available)
+adds the original PC Gamer home page HTML and its HTTP CSP. The staging script
+imports just the selected response record. It supplies the document's HTML
+Accept type because the record contains the response only. The expectation
+checks for the stylesheet rule that hides its exit-intent newsletter overlay.
 
 Once the guest NIC is disconnected, run:
 
@@ -118,11 +127,12 @@ resident.
 | Previous defaults with TIF Medium, proxy startup | 251 MiB |
 | TIF Full and Pop-Up Ads defaults, proxy startup | 647 MiB |
 | TIF Full and Pop-Up Ads defaults, offline engine rebuild | 771 MiB |
+| Maintained defaults with Fanboy’s Annoyance List, publisher replay | 682 MiB |
 
 The 1,536 MiB default provides headroom above the measured rebuild for list
 growth and concurrent work. Account for the rebuild and normal traffic when
 sizing a persistent proxy. Measure captures with large response bodies
-separately. The starter HAR omits response bodies.
+separately. The starter corpus contains one captured HTML body.
 
 To size a new workload, use a disconnected guest with enough memory to
 complete the run. Measure `memory.peak`, `pids.peak` where available, and
@@ -157,14 +167,15 @@ offers raw desktop and mobile browser HARs. Select individual captures within
 the size limits below.
 
 Keep the corpus directory flat. It requires `easylist.txt`, `easyprivacy.txt`,
-and supports `tif-full.txt`, `tif-medium.txt`, `popupads.txt`, `first-party.txt`, `oisd-big.txt`,
+and supports `tif-full.txt`, `tif-medium.txt`, `popupads.txt`, `annoyances.txt`,
+`oisd-big.txt`,
 `badware.txt`, and `urlhaus-online.txt` filter snapshots. For an offline ThreatFox comparison, add
 a locally prepared `threat-domains.txt` hostname snapshot of up to 8 MiB. Use one HaGeZi tier per profile. It accepts
 up to 32 uncompressed `*.har` files, optional `<capture>.labels.json` sidecars,
 and `pushpaganda.csv`, `trapdoor.csv`, and `help-tds.csv`. Each campaign may
 have up to 5,000 CSV rows. The size limits are 32 MiB per HAR, 8 MiB each for
-EasyList and EasyPrivacy, 64 MiB for TIF Full, and 16 MiB each for TIF Medium
-and OISD, 4 MiB for Pop-Up Ads, and 32 MiB for URLhaus Online. The first-party and Badware Risks lists, each sidecar, and each
+EasyList, EasyPrivacy, and Fanboy’s Annoyance List, 64 MiB for TIF Full, and 16 MiB each for TIF Medium
+and OISD, 4 MiB for Pop-Up Ads, and 32 MiB for URLhaus Online. The Badware Risks list, each sidecar, and each
 campaign CSV can be up to 1 MiB. The total corpus can be up to 128 MiB and
 expectations can use up to 64 distinct families. Split larger corpora into batches. The entry count times
 the repeat count is limited to 100,000 per run.
@@ -179,6 +190,15 @@ ad delivery request and entry 12 is a publisher document:
   "12": {"expect": "allow", "family": "publisher_document"}
 }
 ```
+
+An `inject` label can include a `css_contains` string of up to 1,024
+characters to require a specific fragment in the injected stylesheet. This
+checks emitted styling. Browser tests check whether it actually hides the
+captured elements and preserves the controls.
+
+A label with `"probe": true` records a coverage finding in `probe_misses`
+without failing replay. Use probes for historical targets whose support
+depends on what current maintained lists still cover.
 
 The report locates mismatches by capture name and entry index. A reported
 redirect is a recorded HTTP 3xx response other than 304. Use `stop_redirect`

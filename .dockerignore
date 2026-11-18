@@ -3,7 +3,6 @@
 !requirements.txt
 !adblock_addon.py
 !threatfox.py
-!first-party.txt
 !engine
 !engine/Cargo.toml
 !engine/Cargo.lock
