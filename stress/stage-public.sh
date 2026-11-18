@@ -18,6 +18,8 @@ download() {
 
 download https://easylist.to/easylist/easylist.txt easylist.txt 8388608
 download https://easylist.to/easylist/easyprivacy.txt easyprivacy.txt 8388608
+download https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt tif-medium.txt 16777216
+download https://big.oisd.nl/ oisd-big.txt 16777216
 download https://gvrkiran.github.io/adblock/nytimes.com.json nytimes.har 33554432
 download https://humanprod.wpenginepowered.com/wp-content/uploads/4-26-Pushpaganda-Domain-list.csv pushpaganda.csv 1048576
 (
@@ -28,6 +30,7 @@ c3fdfa2c133e57ca97cf0fff835b7f3ed114539ac3801a53c9fde2250233727d  pushpaganda.cs
 SUMS
 )
 cp -- "$here/nytimes.labels.json" "$stage/"
+cp -- "$here/../first-party.txt" "$stage/"
 mv -T --no-clobber -- "$stage" "$destination"
 if [[ -d "$stage" ]]; then
     printf 'Corpus destination already exists. Choose a new directory.\n' >&2

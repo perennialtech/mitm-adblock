@@ -3,7 +3,9 @@
 An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
 [adblock-rust](https://github.com/brave/adblock-rust) engine.
 
-- Network blocking with ABP/uBO-syntax lists (EasyList + EasyPrivacy by default)
+- Network blocking with ABP/uBO-syntax lists and checks on HTTP redirect destinations
+- EasyList, EasyPrivacy, [HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium), and [OISD Big](https://oisd.nl/setup/adblockplus) enabled by default
+- Bundled [first-party rules](first-party.txt) for confirmed publisher-hosted ad endpoints
 - Cosmetic filtering: element-hiding CSS injected into HTML, with CSP nonces handled
 - Lists cached in `~/.cache/mitm-adblock` and refreshed every 24 hours
 
@@ -42,13 +44,22 @@ shown in the web interface.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `adblock_lists` | EasyList, EasyPrivacy | Comma-separated URLs and/or local paths |
+| `adblock_lists` | EasyList, EasyPrivacy, HaGeZi TIF Medium, OISD Big, bundled first-party rules | Comma-separated URLs and/or local paths |
 | `adblock_cache_dir` | `~/.cache/mitm-adblock` | Where downloaded lists are cached |
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
 | `adblock_log_blocked` | `false` | Log every blocked request |
 
 To allow a site, add a rule like `@@||example.com^$document` to your own rules file.
+Setting `adblock_lists` replaces the defaults.
+
+## First-party ads and tracking
+
+Network rules apply to matching requests on the publisher's own site, including
+specific paths such as `||example.com/assets/ad.js^`. A cosmetic rule such
+as `example.com##.sponsored-card` hides matching content inside the publisher's
+HTML. Ads embedded in otherwise legitimate media or API responses require
+format-specific filtering.
 
 ## Stress testing
 

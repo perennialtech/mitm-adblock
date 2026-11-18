@@ -48,6 +48,9 @@ DEFAULT_LISTS = ",".join(
     [
         "https://easylist.to/easylist/easylist.txt",
         "https://easylist.to/easylist/easyprivacy.txt",
+        "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt",
+        "https://big.oisd.nl/",
+        str(Path(__file__).resolve().with_name("first-party.txt")),
     ]
 )
 
@@ -90,6 +93,7 @@ CLASS_RE = re.compile(r"""\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re
 ID_RE = re.compile(r"""\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
 HEAD_RE = re.compile(r"<head\b[^>]*>", re.I)
 HTML_RE = re.compile(r"<html\b[^>]*>", re.I)
+FOLLOWABLE_REDIRECTS = {301, 302, 303, 307, 308}
 
 BLOCKED_PAGE = """<!doctype html><meta charset="utf-8"><title>Blocked</title>
 <body style="font:16px system-ui;margin:3em;color:#444">
@@ -97,7 +101,7 @@ BLOCKED_PAGE = """<!doctype html><meta charset="utf-8"><title>Blocked</title>
 <p><code>{url}</code></p><p>Filter: <code>{filter}</code></p></body>"""
 
 
-def _request_type(req: http.Request) -> str:
+def _request_type(req: http.Request, url: str) -> str:
     h = req.headers
     if h.get("upgrade", "").lower() == "websocket":
         return "websocket"
@@ -105,7 +109,7 @@ def _request_type(req: http.Request) -> str:
     if dest in DEST_TO_TYPE:
         return DEST_TO_TYPE[dest]
     # No fetch metadata (old browser, curl, apps): guess from path / Accept.
-    ext = os.path.splitext(urllib.parse.urlsplit(req.pretty_url).path)[1].lower()
+    ext = os.path.splitext(urllib.parse.urlsplit(url).path)[1].lower()
     if ext in EXT_TO_TYPE:
         return EXT_TO_TYPE[ext]
     accept = h.get("accept", "").lower()
@@ -118,10 +122,10 @@ def _request_type(req: http.Request) -> str:
     return "other"
 
 
-def _source_url(req: http.Request, rtype: str) -> str:
+def _source_url(req: http.Request, url: str, rtype: str) -> str:
     if rtype == "document":
-        return req.pretty_url
-    return req.headers.get("referer") or req.headers.get("origin") or req.pretty_url
+        return url
+    return req.headers.get("referer") or req.headers.get("origin") or url
 
 
 def _attr_tokens(regex: re.Pattern, html: str, split: bool) -> set[str]:
@@ -199,45 +203,53 @@ class AdBlock:
         engine = self.engine
         if engine is None or flow.response is not None:
             return
-        req = flow.request
-        rtype = _request_type(req)
-        url = req.pretty_url
+        url = flow.request.pretty_url
+        self._filter_url(flow, engine, url)
+
+    def _filter_url(self, flow: http.HTTPFlow, engine: adblock.Engine,
+                    url: str, redirect: bool = False) -> bool:
         try:
-            res = engine.check_network_urls(url, _source_url(req, rtype), rtype)
+            rtype = _request_type(flow.request, url)
+            res = engine.check_network_urls(url, _source_url(flow.request, url, rtype), rtype)
         except Exception as e:  # malformed URL etc.
             log.debug("check failed for %s: %s", url, e)
-            return
+            return False
         if not res.matched:
-            return
+            return False
 
         self.stats["blocked"] += 1
         if ctx.options.adblock_log_blocked:
             log.info("blocked [%s] %s  (%s)", rtype, url, res.filter)
 
         # $redirect= rules resolve to data: URLs when resources are loaded.
-        if res.redirect and res.redirect.startswith("data:"):
+        if not redirect and res.redirect and res.redirect.startswith("data:"):
             ctype, body = self._decode_data_url(res.redirect)
             flow.response = http.Response.make(200, body, {"content-type": ctype})
         elif rtype in ("document", "subdocument"):
             page = BLOCKED_PAGE.format(url=_esc(url), filter=_esc(res.filter or ""))
             flow.response = http.Response.make(
-                403, page.encode(), {"content-type": "text/html; charset=utf-8"})
+                403, page.encode(), {"content-type": "text/html; charset=utf-8",
+                                     "cache-control": "no-store"})
         else:
             # Empty success: fewer console errors than a hard failure.
             flow.response = http.Response.make(204, b"", {"cache-control": "no-store"})
         flow.metadata["adblock"] = res.filter
+        return True
 
     def response(self, flow: http.HTTPFlow) -> None:
         engine = self.engine
-        if (engine is None or not ctx.options.adblock_cosmetic
-                or flow.metadata.get("adblock") or flow.response is None):
+        if engine is None or "adblock" in flow.metadata or flow.response is None:
             return
         resp = flow.response
-        if resp.status_code != 200:
+        if resp.status_code in FOLLOWABLE_REDIRECTS:
+            self._filter_redirect(flow, engine)
+            return
+        if not ctx.options.adblock_cosmetic or resp.status_code != 200:
             return
         if "text/html" not in resp.headers.get("content-type", "").lower():
             return
-        if _request_type(flow.request) not in ("document", "subdocument"):
+        url = flow.request.pretty_url
+        if _request_type(flow.request, url) not in ("document", "subdocument"):
             return
 
         try:
@@ -247,7 +259,6 @@ class AdBlock:
         if not html:
             return
 
-        url = flow.request.pretty_url
         cos = engine.url_cosmetic_resources(url)
         selectors = set(cos.hide_selectors)
         if not cos.generichide:
@@ -281,6 +292,20 @@ class AdBlock:
         html = html[: m.end()] + snippet + html[m.end():] if m else snippet + html
         resp.set_text(html)
         self.stats["pages_injected"] += 1
+
+    def _filter_redirect(self, flow: http.HTTPFlow, engine: adblock.Engine) -> None:
+        locations = flow.response.headers.get_all("location")
+        if len(locations) != 1 or not locations[0].strip():
+            return
+        try:
+            target = urllib.parse.urljoin(flow.request.pretty_url, locations[0].strip())
+            parts = urllib.parse.urlsplit(target)
+            if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username is not None:
+                return
+        except ValueError:
+            return
+        if self._filter_url(flow, engine, target, redirect=True):
+            flow.metadata["adblock_redirect"] = True
 
     def done(self) -> None:
         log.info("adblock stats: %s", self.stats)
