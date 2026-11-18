@@ -43,15 +43,17 @@ docker build -t mitm-adblock:stress .
 
 The staging script downloads EasyList, EasyPrivacy, and
 [HaGeZi Threat Intelligence Feeds Medium](https://github.com/hagezi/dns-blocklists#tifmedium)
-from their publishers and
-fetches two checksum-pinned public data sources. Keep the resulting directory
+from their publishers, copies the bundled first-party rules, and fetches two
+checksum-pinned public data sources. Keep the resulting directory
 to rerun with the same filter snapshots. The workload performs no downloads.
 
 - The [WebSci ad-blocking study download](https://gvrkiran.github.io/adblock/)
   supplies a real advertising-heavy HAR with hundreds of requests, trackers,
   ad auctions, and redirects. The starter expectations check its publisher
-  document, ad viewability beacon, ad auction request, and ad redirect. The
-  capture omits HTTP headers and response bodies. Its recorded MIME type
+  document, ad viewability beacon, ad auction request, ad redirects, and
+  first-party ad and tracking endpoints. A recorded first-party account data
+  request is an allow control. The capture omits HTTP headers and response
+  bodies. Its recorded MIME type
   identifies HTML responses and its HAR `redirectURL` supplies the target of a
   redirect when the recorded Location header is unavailable.
 - [HUMAN Satori's Pushpaganda investigation](https://www.humansecurity.com/learn/resources/satori-threat-intelligence-alert-pushpaganda-manipulates-google-discovery-feeds-with-ai-generated-content-to-spread-malicious-notifications/)
@@ -92,14 +94,15 @@ offers raw desktop and mobile browser HARs. Select individual captures within
 the size limits below.
 
 Keep the corpus directory flat. It requires `easylist.txt`, `easyprivacy.txt`,
-and supports the optional `tif-medium.txt` filter snapshot for comparison with
-the two-list baseline. It accepts
+and supports optional `tif-medium.txt` and `first-party.txt` filter snapshots
+for comparison with the two-list baseline. It accepts
 up to 32 uncompressed `*.har` files, optional `<capture>.labels.json` sidecars,
 and the optional `pushpaganda.csv`. Each HAR can be up to 32 MiB, each EasyList
-or EasyPrivacy snapshot up to 8 MiB, the threat list up to 16 MiB, and each
-sidecar or CSV up to 1 MiB. The total corpus can be
-up to 128 MiB and expectations can use up to 64 distinct families. Split larger corpora into batches. The entry count times
-the repeat count is limited to 100,000 per run.
+or EasyPrivacy snapshot up to 8 MiB, and the threat list up to 16 MiB. The
+first-party rules, each sidecar, and the CSV can be up to 1 MiB each. The
+total corpus can be up to 128 MiB and expectations can use up to 64 distinct
+families. Split larger corpora into batches. The entry count times the repeat
+count is limited to 100,000 per run.
 
 For a capture named `popunder.har`, `popunder.labels.json` uses zero-based
 indices into its `log.entries` array. For example, if entry 7 is the confirmed

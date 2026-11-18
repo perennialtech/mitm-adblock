@@ -29,6 +29,7 @@ c3fdfa2c133e57ca97cf0fff835b7f3ed114539ac3801a53c9fde2250233727d  pushpaganda.cs
 SUMS
 )
 cp -- "$here/nytimes.labels.json" "$stage/"
+cp -- "$here/../first-party.txt" "$stage/"
 mv -T --no-clobber -- "$stage" "$destination"
 if [[ -d "$stage" ]]; then
     printf 'Corpus destination already exists. Choose a new directory.\n' >&2

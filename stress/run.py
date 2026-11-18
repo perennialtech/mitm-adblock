@@ -19,6 +19,7 @@ from pathlib import Path
 MIB = 1024 * 1024
 RULES = {"easylist.txt", "easyprivacy.txt"}
 THREAT_LIST = "tif-medium.txt"
+FIRST_PARTY_RULES = "first-party.txt"
 INDICATORS = "pushpaganda.csv"
 CAPTURE_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,90}\.har")
 MAX_REPORT = 128 * 1024
@@ -71,11 +72,11 @@ def copy_corpus(source, destination):
         with os.scandir(directory) as members:
             for member in members:
                 names.add(member.name)
-                if len(names) > 68:
+                if len(names) > 69:
                     raise ValueError("The corpus contains too many files.")
         captures = {name for name in names if CAPTURE_NAME.fullmatch(name)}
         labels = {name.removesuffix(".har") + ".labels.json" for name in captures}
-        allowed = RULES | {THREAT_LIST, INDICATORS} | captures | labels
+        allowed = RULES | {THREAT_LIST, FIRST_PARTY_RULES, INDICATORS} | captures | labels
         if not RULES <= names or not 1 <= len(captures) <= 32 or names - allowed:
             raise ValueError("Corpus needs both filter lists and 1–32 HARs, with optional paired labels and campaign CSV.")
         limits = dict.fromkeys(captures, 32 * MIB)
