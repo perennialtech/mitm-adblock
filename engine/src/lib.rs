@@ -46,20 +46,22 @@ impl Engine {
         })
     }
 
+    #[pyo3(signature = (url, source_url, request_type, method, exact_payload_url=false))]
     fn check_network_urls(
         &self,
         url: &str,
         source_url: &str,
         request_type: &str,
         method: &str,
+        exact_payload_url: bool,
     ) -> PyResult<NetworkResult> {
         let request = Request::new(url, source_url, request_type, method)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
         let found_host = self
             .threat_domains
             .contains(request.hostname.trim_end_matches('.'));
-        let result = if found_host {
-            // An exact hostname match is an ordinary blocking rule. Let the
+        let result = if found_host || exact_payload_url {
+            // An exact threat match is an ordinary blocking rule. Let the
             // same engine evaluate its exceptions and important rules.
             self.inner
                 .check_network_request_subset(&request, true, false)
@@ -67,10 +69,15 @@ impl Engine {
             self.inner.check_network_request(&request)
         };
         let matched = result.should_block();
-        let filter = result
-            .filter
-            .and_then(|rule| rule.raw_line)
-            .or_else(|| (found_host && matched).then(|| "Exact threat hostname".to_owned()));
+        let filter = result.filter.and_then(|rule| rule.raw_line).or_else(|| {
+            if !matched {
+                None
+            } else if exact_payload_url {
+                Some("Exact threat payload URL".to_owned())
+            } else {
+                found_host.then(|| "Exact threat hostname".to_owned())
+            }
+        });
         // Deliberately leave rewritten_url out of the proxy-facing result.
         Ok(NetworkResult {
             matched,

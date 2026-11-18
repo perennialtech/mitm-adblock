@@ -69,8 +69,11 @@ readable by the proxy user. Set `ADBLOCK_THREATFOX_KEY_FILE` to its path inside
 the container or pass `--set adblock_threatfox_key_file=/path/to/key`.
 The proxy adds reported dedicated C2 and payload-delivery domains with a
 confidence of at least 75. Matching uses the named hostname, including the
-optional final DNS dot. The proxy refreshes the export with its other lists
-and can use a cached copy for up to seven days if the download fails.
+optional final DNS dot. It also blocks exact HTTP and HTTPS payload URLs with
+the same minimum confidence for seven days after they were last reported.
+This protects individual paths on shared or compromised hosts and preserves
+the original URL on allowed requests. The proxy refreshes the export with its
+other lists and can use a cached copy for up to seven days if the download fails.
 
 ## First-party ads and tracking
 
