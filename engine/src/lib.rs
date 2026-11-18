@@ -7,7 +7,10 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 #[pyclass]
-struct Engine(adblock::Engine);
+struct Engine {
+    inner: adblock::Engine,
+    threat_domains: HashSet<String>,
+}
 
 #[pyclass(get_all)]
 struct NetworkResult {
@@ -28,14 +31,18 @@ struct CosmeticResources {
 #[pymethods]
 impl Engine {
     #[new]
-    fn new(py: Python<'_>, lists: Vec<String>) -> Self {
+    #[pyo3(signature = (lists, threat_domains=None))]
+    fn new(py: Python<'_>, lists: Vec<String>, threat_domains: Option<HashSet<String>>) -> Self {
         py.detach(move || {
             // Retain the original rule for logs and blocked-document pages.
             let mut filters = FilterSet::new(true);
             for list in lists {
                 filters.add_filter_list(list, ParseOptions::default());
             }
-            Self(adblock::Engine::new_with_filter_set(filters))
+            Self {
+                inner: adblock::Engine::new_with_filter_set(filters),
+                threat_domains: threat_domains.unwrap_or_default(),
+            }
         })
     }
 
@@ -48,17 +55,32 @@ impl Engine {
     ) -> PyResult<NetworkResult> {
         let request = Request::new(url, source_url, request_type, method)
             .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        let result = self.0.check_network_request(&request);
+        let found_host = self
+            .threat_domains
+            .contains(request.hostname.trim_end_matches('.'));
+        let result = if found_host {
+            // An exact hostname match is an ordinary blocking rule. Let the
+            // same engine evaluate its exceptions and important rules.
+            self.inner
+                .check_network_request_subset(&request, true, false)
+        } else {
+            self.inner.check_network_request(&request)
+        };
+        let matched = result.should_block();
+        let filter = result
+            .filter
+            .and_then(|rule| rule.raw_line)
+            .or_else(|| (found_host && matched).then(|| "Exact threat hostname".to_owned()));
         // Deliberately leave rewritten_url out of the proxy-facing result.
         Ok(NetworkResult {
-            matched: result.should_block(),
-            filter: result.filter.and_then(|rule| rule.raw_line),
+            matched,
+            filter,
             redirect: result.redirect,
         })
     }
 
     fn url_cosmetic_resources(&self, url: &str) -> CosmeticResources {
-        let resources = self.0.url_cosmetic_resources(url);
+        let resources = self.inner.url_cosmetic_resources(url);
         let mut style_rules: Vec<_> = resources
             .procedural_actions
             .iter()
@@ -81,7 +103,8 @@ impl Engine {
         ids: Vec<String>,
         exceptions: HashSet<String>,
     ) -> Vec<String> {
-        self.0.hidden_class_id_selectors(classes, ids, &exceptions)
+        self.inner
+            .hidden_class_id_selectors(classes, ids, &exceptions)
     }
 }
 

@@ -144,7 +144,8 @@ the size limits below.
 
 Keep the corpus directory flat. It requires `easylist.txt`, `easyprivacy.txt`,
 and supports `tif-full.txt`, `tif-medium.txt`, `popupads.txt`, `first-party.txt`, `oisd-big.txt`,
-and `badware.txt` filter snapshots. Use one HaGeZi tier per profile. It accepts
+and `badware.txt` filter snapshots. For an offline ThreatFox comparison, add
+a locally prepared `threat-domains.txt` hostname snapshot of up to 8 MiB. Use one HaGeZi tier per profile. It accepts
 up to 32 uncompressed `*.har` files, optional `<capture>.labels.json` sidecars,
 and `pushpaganda.csv`, `trapdoor.csv`, and `help-tds.csv`. Each campaign may
 have up to 5,000 CSV rows. The size limits are 32 MiB per HAR, 8 MiB each for

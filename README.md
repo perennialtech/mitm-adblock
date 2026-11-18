@@ -3,7 +3,7 @@
 An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
 [adblock-rust](https://github.com/brave/adblock-rust) engine.
 
-- Network blocking with ABP/uBO-syntax lists and checks on HTTP redirect destinations
+- Network blocking with ABP/uBO-syntax lists, HTTP redirects, and HTML responses with explicit HTTP `Refresh` targets
 - EasyList, EasyPrivacy,
   [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
   [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
@@ -55,10 +55,22 @@ shown in the web interface.
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
 | `adblock_log_blocked` | `false` | Log every blocked request |
+| `adblock_threatfox_key_file` | empty | Optional path to an abuse.ch ThreatFox authentication key |
+| `adblock_threat_domains_file` | empty | Optional file containing additional exact threat hostnames, one per line |
 
 To allow a site, add a rule like `@@||example.com^$document` to your own rules file.
 Setting `adblock_lists` replaces the defaults. The proxy forwards allowed URLs
 with their original query parameters, including when a list contains `$removeparam` rules.
+
+## ThreatFox
+
+Mount a file containing the [ThreatFox authentication key](https://threatfox.abuse.ch/export/)
+readable by the proxy user. Set `ADBLOCK_THREATFOX_KEY_FILE` to its path inside
+the container or pass `--set adblock_threatfox_key_file=/path/to/key`.
+The proxy adds reported dedicated C2 and payload-delivery domains with a
+confidence of at least 75. Matching uses the named hostname, including the
+optional final DNS dot. The proxy refreshes the export with its other lists
+and can use a cached copy for up to seven days if the download fails.
 
 ## First-party ads and tracking
 

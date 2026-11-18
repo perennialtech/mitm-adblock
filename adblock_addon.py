@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import secrets
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -42,9 +43,12 @@ from pathlib import Path
 from mitm_adblock_engine import Engine
 from mitmproxy import ctx, http
 
+from threatfox import fetch_domains as fetch_threatfox_domains, valid_domains
+
 log = logging.getLogger("adblock")
 
 TIF_FULL = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt"
+THREATFOX_STALE_SECONDS = 7 * 24 * 3600
 TIF_MEDIUM = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt"
 
 DEFAULT_LISTS = ",".join(
@@ -231,9 +235,16 @@ class AdBlock:
                           "Inject element-hiding CSS into HTML pages.")
         loader.add_option("adblock_log_blocked", bool, False,
                           "Log every blocked request.")
+        loader.add_option("adblock_threatfox_key_file", str,
+                          os.environ.get("ADBLOCK_THREATFOX_KEY_FILE", ""),
+                          "File containing the ThreatFox auth key for exact-domain blocking.")
+        loader.add_option("adblock_threat_domains_file", str, "",
+                          "Local file containing additional exact threat hostnames, one per line.")
 
     def configure(self, updated) -> None:
-        if "adblock_lists" in updated or "adblock_cache_dir" in updated:
+        if {
+            "adblock_lists", "adblock_cache_dir", "adblock_threatfox_key_file", "adblock_threat_domains_file",
+        } & set(updated):
             self._build_engine()
 
     def request(self, flow: http.HTTPFlow) -> None:
@@ -409,6 +420,40 @@ class AdBlock:
             log.error("download failed for %s: %s", src, e)
             return None
 
+    def _threatfox(self, cache: Path, force: bool) -> set[str]:
+        key_file = ctx.options.adblock_threatfox_key_file
+        if not key_file:
+            return set()
+        cached = cache / "threatfox-domains.txt"
+        fallback = set()
+        try:
+            age = time.time() - cached.stat().st_mtime
+            if age <= THREATFOX_STALE_SECONDS:
+                fallback = valid_domains(cached.read_text(encoding="ascii").splitlines())
+                if not force and age < ctx.options.adblock_update_hours * 3600 and fallback:
+                    return fallback
+        except (OSError, UnicodeError):
+            pass
+
+        temp_path = None
+        try:
+            domains = fetch_threatfox_domains(Path(key_file).expanduser())
+            cache.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=cache, mode="w", encoding="ascii", delete=False) as file:
+                temp_path = Path(file.name)
+                file.write("\n".join(sorted(domains)) + "\n")
+            temp_path.replace(cached)
+            log.info("downloaded ThreatFox (%d exact domains)", len(domains))
+            return domains
+        except Exception as error:
+            # Error text from a server or HTTP client might include the key-bearing URL.
+            log.warning("ThreatFox refresh failed (%s)%s", type(error).__name__,
+                        "; using cached domains" if fallback else "")
+            return fallback
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
     def _build_engine(self, force: bool = False) -> None:
         try:
             cache = Path(os.path.expanduser(ctx.options.adblock_cache_dir))
@@ -423,12 +468,21 @@ class AdBlock:
                             log.warning("TIF Full unavailable; using the previous TIF Medium cache")
                 if text:
                     lists.append(text)
+            domains = self._threatfox(cache, force)
+            local_domains = ctx.options.adblock_threat_domains_file
+            if local_domains:
+                try:
+                    with Path(local_domains).expanduser().open(encoding="ascii") as stream:
+                        domains.update(valid_domains(stream))
+                except (OSError, UnicodeError) as error:
+                    log.warning("Could not read local threat domains (%s)", type(error).__name__)
             t0 = time.time()
-            engine = Engine(lists)
+            engine = Engine(lists, domains)
             with self._lock:
                 self.engine = engine
                 self.loaded_at = time.time()
-            log.info("adblock engine ready: %d list(s), built in %.2fs", len(lists), time.time() - t0)
+            log.info("adblock engine ready: %d list(s), %d exact threat domains, built in %.2fs",
+                     len(lists), len(domains), time.time() - t0)
         finally:
             self._reloading = False
 

@@ -1,4 +1,6 @@
+import io
 import tempfile
+import zipfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -8,6 +10,7 @@ from unittest.mock import patch
 from mitmproxy import connection, ctx, http, options
 
 from adblock_addon import AdBlock, TIF_FULL, TIF_MEDIUM, _cached_list
+from threatfox import domains_from_export
 
 
 def flow_for(url, method="GET"):
@@ -115,6 +118,50 @@ class AdBlockTests(unittest.TestCase):
         flow = flow_for("https://known-threat.test/")
         self.addon.request(flow)
         self.assertEqual(flow.response.status_code, 403)
+
+    def test_threatfox_uses_exact_eligible_hosts_and_honors_exceptions(self):
+        report = b"""# "first_seen_utc", "ioc_value", "ioc_type", "threat_type", "confidence_level", "is_compromised"
+"timestamp", "bad.hosted.test", "domain", "botnet_cc", "90", "False"
+"timestamp", "allow.hosted.test", "domain", "payload_delivery", "90", "False"
+"timestamp", "compromised.hosted.test", "domain", "botnet_cc", "100", "True"
+"timestamp", "low.hosted.test", "domain", "botnet_cc", "50", "False"
+"timestamp", "https://url.hosted.test/path", "url", "payload_delivery", "100", "False"
+"""
+        raw = io.BytesIO()
+        with zipfile.ZipFile(raw, "w") as archive:
+            archive.writestr("sample.csv", report)
+        domains = domains_from_export(raw.getvalue())
+        ctx.options.update(adblock_threatfox_key_file="/unused/key", adblock_cache_dir=str(self.rules.parent))
+        with patch("adblock_addon.fetch_threatfox_domains", return_value=domains):
+            self.load_rules("@@||allow.hosted.test^$document")
+        for url, blocked in (
+            ("https://bad.hosted.test:443/landing", True),
+            ("http://bad.hosted.test/path", True),
+            ("https://bad.hosted.test.:8443/path", True),
+            ("https://bad.hosted.test:8443@clean.hosted.test/", False),
+            ("https://child.bad.hosted.test/", False),
+            ("https://hosted.test/", False),
+            ("https://compromised.hosted.test/", False),
+            ("https://low.hosted.test/", False),
+            ("https://url.hosted.test/path", False),
+            ("https://allow.hosted.test/", False),
+        ):
+            with self.subTest(url=url):
+                flow = flow_for(url)
+                self.addon.request(flow)
+                self.assertEqual(flow.response is not None, blocked)
+        saved = self.rules.parent / "threatfox-domains.txt"
+        self.assertEqual(set(saved.read_text().splitlines()), domains)
+        with patch("adblock_addon.fetch_threatfox_domains", side_effect=OSError("sensitive response")):
+            self.addon._build_engine(force=True)
+        flow = flow_for("https://bad.hosted.test/")
+        self.addon.request(flow)
+        self.assertEqual(flow.response.status_code, 403)
+        ctx.options.update(adblock_threatfox_key_file="")
+        self.addon.configure({"adblock_threatfox_key_file"})
+        flow = flow_for("https://bad.hosted.test/")
+        self.addon.request(flow)
+        self.assertIsNone(flow.response)
 
     def test_followable_refresh_uses_get_without_rewriting_other_responses(self):
         self.load_rules("/bounce^$document,method=get", "@@/continue^$document")

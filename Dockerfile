@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir --only-binary=:all: -r requirements.txt \
     && groupadd --gid 10001 mitmproxy \
     && useradd --uid 10001 --gid 10001 --home-dir /var/lib/mitmproxy --no-create-home mitmproxy \
     && install -d -m 0700 -o 10001 -g 10001 /var/lib/mitmproxy /var/cache/mitm-adblock
-COPY adblock_addon.py first-party.txt ./
+COPY adblock_addon.py threatfox.py first-party.txt ./
 COPY --from=engine-build /build/target/release/libmitm_adblock_engine.so ./mitm_adblock_engine.abi3.so
 
 ENV HOME=/var/lib/mitmproxy PYTHONDONTWRITEBYTECODE=1
