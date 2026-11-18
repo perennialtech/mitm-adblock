@@ -50,7 +50,8 @@ to rerun with the same filter snapshots. The workload performs no downloads.
   ad auctions, and redirects. The starter expectations check its publisher
   document, ad viewability beacon, ad auction request, and ad redirect. The
   capture omits HTTP headers and response bodies. Its recorded MIME type
-  still identifies HTML responses for the coverage report.
+  identifies HTML responses and its HAR `redirectURL` supplies the target of a
+  redirect when the recorded Location header is unavailable.
 - [HUMAN Satori's Pushpaganda investigation](https://www.humansecurity.com/learn/resources/satori-threat-intelligence-alert-pushpaganda-manipulates-google-discovery-feeds-with-ai-generated-content-to-spread-malicious-notifications/)
   supplies campaign domains involved in malicious push advertising. The
   runner checks each domain as an offline document request and reports those
@@ -107,6 +108,9 @@ ad delivery request and entry 12 is a publisher document:
 ```
 
 The report locates mismatches by capture name and entry index. A reported
-redirect is a recorded HTTP 3xx response other than 304. Each recorded hop is
-evaluated independently, so a blocked hop measures the addon's behavior on
-that request and later hops still contribute their own observations.
+redirect is a recorded HTTP 3xx response other than 304. A `block_redirect`
+label requires the addon to stop the outgoing redirect at the response hook.
+The `blocked` and `allowed` counters show request-hook outcomes.
+`blocked_redirects` counts both request and response blocks on recorded
+redirect hops, with `blocked_redirect_destinations` counting the response
+blocks. Each hop is evaluated independently.

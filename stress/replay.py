@@ -41,7 +41,10 @@ def labels_for(path, entry_count):
         index = int(ordinal)
         if str(index) != ordinal or not 0 <= index < entry_count:
             raise CorpusError("A label points outside the HAR.")
-        if label["expect"] not in {"block", "allow", "inject"} or not FAMILY.fullmatch(label["family"]):
+        if (
+            label["expect"] not in {"block", "block_redirect", "allow", "inject"}
+            or not FAMILY.fullmatch(label["family"])
+        ):
             raise CorpusError("Invalid expectation or family in labels.")
     return {int(index): label for index, label in raw.items()}
 
@@ -96,10 +99,15 @@ def har_flow(entry):
     flow = request_to_flow(entry)
     if flow.response.status_code == 0:
         flow.response = None
-    elif "content-type" not in flow.response.headers:
-        mime = entry["response"]["content"].get("mimeType")
-        if mime:
-            flow.response.headers["content-type"] = mime
+    else:
+        recorded = entry["response"]
+        if "content-type" not in flow.response.headers:
+            mime = recorded["content"].get("mimeType")
+            if mime:
+                flow.response.headers["content-type"] = mime
+        # Some archives retain the redirect target but omit the HTTP headers.
+        if "location" not in flow.response.headers and recorded.get("redirectURL"):
+            flow.response.headers["location"] = recorded["redirectURL"]
     return flow
 
 
@@ -132,6 +140,7 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
                 if flow.response is not None:
                     addon.response(flow)
                 timings.append(time.perf_counter_ns() - start)
+                blocked_destination = "adblock_redirect" in flow.metadata
                 injected = (
                     addon.stats["pages_injected"] > pages_before
                     and flow.response.raw_content != original_body
@@ -147,15 +156,21 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
             counts["blocked" if blocked else "allowed"] += 1
             if 300 <= recorded_status < 400 and recorded_status != 304:
                 counts["recorded_redirects"] += 1
-                counts["blocked_redirects"] += blocked
+                counts["blocked_redirects"] += blocked or blocked_destination
+                counts["blocked_redirect_destinations"] += blocked_destination
             counts["html_with_body"] += has_body
             counts["html_missing_body"] += html and not has_body
             counts["injected"] += injected
             if label:
                 expected = label["expect"]
-                actual = "block" if blocked else "inject" if injected else "allow"
+                if blocked:
+                    actual = "block"
+                elif blocked_destination:
+                    actual = "block_redirect"
+                else:
+                    actual = "inject" if injected else "allow"
                 # A permitted page can also receive cosmetic filtering.
-                matched = expected == actual or (expected == "allow" and not blocked)
+                matched = expected == actual or (expected == "allow" and actual == "inject")
                 families[label["family"]]["checked"] += 1
                 families[label["family"]]["missed"] += not matched
                 counts["expectation_misses"] += not matched

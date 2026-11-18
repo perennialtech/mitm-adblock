@@ -3,7 +3,7 @@
 An ad-blocking addon for [mitmproxy](https://mitmproxy.org), powered by Brave's
 [adblock-rust](https://github.com/brave/adblock-rust) engine.
 
-- Network blocking with ABP/uBO-syntax lists (EasyList + EasyPrivacy by default)
+- Network blocking with ABP/uBO-syntax lists (EasyList + EasyPrivacy by default), including HTTP redirect destinations
 - Cosmetic filtering: element-hiding CSS injected into HTML, with CSP nonces handled
 - Lists cached in `~/.cache/mitm-adblock` and refreshed every 24 hours
 
