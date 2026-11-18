@@ -7,12 +7,13 @@ keeping legitimate content and site features usable. It uses Brave's
 [adblock-rust](https://github.com/brave/adblock-rust) engine.
 
 - Network blocking with ABP/uBO-syntax lists, HTTP redirects, and HTML responses with explicit HTTP `Refresh` targets
-- Bundled [first-party rules](first-party.txt) for confirmed publisher-hosted ad endpoints
-- Cosmetic filtering of matched overlays, sponsored cards, and other page elements
-- EasyList, EasyPrivacy,
+- Cosmetic filtering of matched overlays, sponsored cards, and leftover ad placements
+- Removal of Safari Smart App Banner metadata from top-level pages
+- EasyList, EasyPrivacy, [Fanboy's Annoyance List](https://easylist.to/#fanboys-annoyance-list),
   [HaGeZi Threat Intelligence Feeds Full](https://github.com/hagezi/dns-blocklists#tif),
   [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists#popupads),
   [OISD Big](https://oisd.nl/setup/adblockplus),
+  [Peter Lowe’s Ad and Tracking Server List](https://pgl.yoyo.org/adservers/),
   [uBlock Origin Badware Risks](https://github.com/uBlockOrigin/uAssets/blob/master/filters/badware.txt),
   and [URLhaus Online](https://github.com/curbengh/urlhaus-filter) enabled by default
 - Lists cached in `~/.cache/mitm-adblock` and refreshed every 24 hours
@@ -53,17 +54,19 @@ shown in the web interface.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `adblock_lists` | EasyList, EasyPrivacy, HaGeZi TIF Full, HaGeZi Pop-Up Ads, OISD Big, uBlock Origin Badware Risks, URLhaus Online, bundled first-party rules | Comma-separated URLs and/or local paths |
+| `adblock_lists` | EasyList, EasyPrivacy, Fanboy’s Annoyance List, HaGeZi TIF Full, HaGeZi Pop-Up Ads, OISD Big, Peter Lowe’s Ad and Tracking Server List, uBlock Origin Badware Risks, URLhaus Online | Comma-separated URLs and/or local paths |
 | `adblock_cache_dir` | `~/.cache/mitm-adblock` | Where downloaded lists are cached |
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
+| `adblock_smart_app_banners` | `true` | Remove Safari Smart App Banner metadata |
 | `adblock_log_blocked` | `false` | Log every blocked request |
 | `adblock_threatfox_key_file` | empty | Optional path to an abuse.ch ThreatFox authentication key |
 | `adblock_threat_domains_file` | empty | Optional file containing additional exact threat hostnames, one per line |
 
-To allow a site, add a rule like `@@||example.com^$document` to your own rules file.
 Setting `adblock_lists` replaces the defaults. The proxy forwards allowed URLs
 with their original query parameters, including when a list contains `$removeparam` rules.
+The default subscriptions block dedicated affiliate redirect hosts listed by
+Peter Lowe, including direct visits to those redirect hosts.
 
 ## ThreatFox
 
@@ -81,11 +84,20 @@ other lists and can use a cached copy for up to seven days if the download fails
 
 ## First-party ads and tracking
 
-Network rules apply to matching requests on the publisher's own site, including
-specific paths such as `||example.com/assets/ad.js^`. A cosmetic rule such
-as `example.com##.sponsored-card` hides matching content inside the publisher's
-HTML. Ads embedded in otherwise legitimate media or API responses require
-format-specific filtering.
+Maintained lists cover publisher-hosted ads through request paths and
+cosmetic selectors on the publisher's own page. Ads embedded in otherwise
+legitimate media or API responses require format-specific filtering.
+
+The proxy authorizes its exact stylesheet through HTTP Content-Security-Policy
+headers and leaves author scripts and inline style attributes under the site's
+policy. HTML with a CSP meta tag retains its original CSS policy. Pages served
+as downloads or with `Cache-Control: no-transform` retain their body.
+
+Filter decisions use HTTP context. The proxy can block a pop-up's known ad
+destination or a dedicated script that opens it. Browser-side APIs are needed
+to identify which tab opened a window, handle push permission prompts, and run
+procedural cosmetic filters or scriptlets. Hiding a consent notice has no effect
+on the user's consent decision.
 
 ## Stress testing
 

@@ -3,12 +3,17 @@ set -euo pipefail
 umask 077
 
 with_campaigns=false
-if [[ ${1:-} == --with-campaigns ]]; then
-    with_campaigns=true
+with_ranked_scans=false
+while (( $# )); do
+    case "$1" in
+        --with-campaigns) with_campaigns=true ;;
+        --with-ranked-scans) with_ranked_scans=true ;;
+        *) break ;;
+    esac
     shift
-fi
+done
 if (( $# > 1 )) || [[ ${1:-} == -* ]]; then
-    printf 'Usage: %s [--with-campaigns] [new corpus directory]\n' "$0" >&2
+    printf 'Usage: %s [--with-campaigns] [--with-ranked-scans] [new corpus directory]\n' "$0" >&2
     exit 2
 fi
 destination=${1:-stress-corpus}
@@ -23,9 +28,11 @@ download() {
 
 download https://easylist.to/easylist/easylist.txt easylist.txt 8388608
 download https://easylist.to/easylist/easyprivacy.txt easyprivacy.txt 8388608
+download https://secure.fanboy.co.nz/fanboy-annoyance.txt annoyances.txt 8388608
 download https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt tif-full.txt 67108864
 download https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt popupads.txt 4194304
 download https://big.oisd.nl/ oisd-big.txt 16777216
+download "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&mimetype=plaintext" peter-lowe.txt 1048576
 download https://ublockorigin.github.io/uAssets/filters/badware.txt badware.txt 1048576
 download https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-online.txt urlhaus-online.txt 33554432
 download https://gvrkiran.github.io/adblock/nytimes.com.json nytimes.har 33554432
@@ -35,6 +42,20 @@ download https://gvrkiran.github.io/adblock/nytimes.com.json nytimes.har 3355443
 96654a49e4b073f322e213c5806b9770f7b9dfdac7c825e71bd9669f1cb22530  nytimes.har
 SUMS
 )
+# Common Crawl, October 2026. Fetch only the archived PC Gamer response record.
+warc_path=crawl-data/CC-MAIN-2026-43/segments/1791170054112.6/warc/CC-MAIN-20261006173032-20261006203032-00126.warc.gz
+curl -q --fail --silent --show-error --proto '=https' --max-time 60 \
+    --range 820300279-820697935 --max-filesize 397657 \
+    --output "$stage/pcgamer.warc.gz" "https://data.commoncrawl.org/$warc_path"
+(
+    cd -- "$stage"
+    sha256sum --strict --check <<'SUMS'
+07e594e01cba279ca40cf5c35bbab6feebdec1155acfb7df0b30c0e7e1f19fbd  pcgamer.warc.gz
+SUMS
+)
+python3 "$here/import-publisher.py" "$stage/pcgamer.warc.gz" "$stage/pcgamer.har"
+rm -- "$stage/pcgamer.warc.gz"
+
 if [[ $with_campaigns == true ]]; then
     download https://humanprod.wpenginepowered.com/wp-content/uploads/4-26-Pushpaganda-Domain-list.csv pushpaganda.csv 1048576
     download https://humanprod.wpenginepowered.com/wp-content/uploads/Trapdoor-C2-Domains.csv trapdoor.csv 1048576
@@ -48,8 +69,18 @@ c3fdfa2c133e57ca97cf0fff835b7f3ed114539ac3801a53c9fde2250233727d  pushpaganda.cs
 SUMS
     )
 fi
-cp -- "$here/nytimes.labels.json" "$stage/"
-cp -- "$here/../first-party.txt" "$stage/"
+cp -- "$here/nytimes.labels.json" "$here/pcgamer.labels.json" "$here/pcgamer.clicks.json" "$stage/"
+# The publisher HTML and script were captured before recording the click in a NIC-less VM.
+cp -- "$here/fixtures/"{kutlat-click.har,kutlat-click.labels.json,kutlat-click.clicks.json} "$stage/"
+(
+    cd -- "$stage"
+    sha256sum --strict --check <<'SUMS'
+5e9092d1544666cf50fb4ba4020f2ac4580afc0990e0be0621ac17e339d8f7d0  kutlat-click.har
+SUMS
+)
+if [[ $with_ranked_scans == true ]]; then
+    python3 "$here/ranked-scans.py" "$stage"
+fi
 mv -T --no-clobber -- "$stage" "$destination"
 if [[ -d "$stage" ]]; then
     printf 'Corpus destination already exists. Choose a new directory.\n' >&2

@@ -5,7 +5,7 @@ Network blocking: every request is checked against ABP/uBO-syntax filter
 lists (EasyList, EasyPrivacy, ...). Matches never leave your machine.
 Cosmetic filtering: HTML pages get a <style> block that hides ad elements
 (site-specific ##rules plus generic rules matched against the page's
-classes/ids), with CSP nonces handled so the injection isn't blocked.
+classes/ids). CSP authorizes the exact injected stylesheet where necessary.
 
 Install:
     pip install -r requirements.txt ./engine
@@ -22,6 +22,7 @@ Options (set with --set name=value):
     adblock_cache_dir      where downloaded lists are cached
     adblock_update_hours   re-download lists after this many hours
     adblock_cosmetic       true/false, enable element hiding in HTML
+    adblock_smart_app_banners   true/false, remove Safari Smart App Banner tags
     adblock_log_blocked    true/false, log every blocked request
 """
 
@@ -29,10 +30,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from html import unescape
+from html.parser import HTMLParser
 import logging
 import os
 import re
-import secrets
 import tempfile
 import threading
 import time
@@ -47,6 +49,7 @@ from threatfox import MAX_AGE_SECONDS, ThreatFoxSnapshot, exact_url_key, fetch_s
 
 log = logging.getLogger("adblock")
 
+ANNOYANCES = "https://secure.fanboy.co.nz/fanboy-annoyance.txt"
 TIF_FULL = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt"
 TIF_MEDIUM = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt"
 
@@ -54,12 +57,13 @@ DEFAULT_LISTS = ",".join(
     [
         "https://easylist.to/easylist/easylist.txt",
         "https://easylist.to/easylist/easyprivacy.txt",
+        ANNOYANCES,
         TIF_FULL,
         "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/popupads.txt",
         "https://big.oisd.nl/",
+        "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&mimetype=plaintext",
         "https://ublockorigin.github.io/uAssets/filters/badware.txt",
         "https://malware-filter.gitlab.io/urlhaus-filter/urlhaus-filter-online.txt",
-        str(Path(__file__).resolve().with_name("first-party.txt")),
     ]
 )
 
@@ -98,10 +102,13 @@ EXT_TO_TYPE = {
     ".html": "document", ".htm": "document",
 }
 
-CLASS_RE = re.compile(r"""\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
-ID_RE = re.compile(r"""\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
-HEAD_RE = re.compile(r"<head\b[^>]*>", re.I)
-HTML_RE = re.compile(r"<html\b[^>]*>", re.I)
+# Match complete attribute names and split at HTML space characters only.
+ATTR_SPACE = r"[\t\n\f\r ]"
+ATTR_VALUE = r"""(?:"([^"]*)"|'([^']*)'|([^\t\n\f\r >]+))"""
+CLASS_RE = re.compile(rf"{ATTR_SPACE}class{ATTR_SPACE}*={ATTR_SPACE}*{ATTR_VALUE}", re.I)
+ID_RE = re.compile(rf"{ATTR_SPACE}id{ATTR_SPACE}*={ATTR_SPACE}*{ATTR_VALUE}", re.I)
+HTML_SPACE = re.compile(ATTR_SPACE + "+")
+INLINE_SOURCE = re.compile(r"'(?:nonce-|sha(?:256|384|512)-)[A-Za-z0-9+/_-]+=*'", re.I)
 FOLLOWABLE_REDIRECTS = {301, 302, 303, 307, 308}
 REFRESH_TARGET = re.compile(
     r"[ \t]*[0-9]+(?:\.[0-9]*)?[ \t]*[;,][ \t]*url[ \t]*=[ \t]*"
@@ -173,44 +180,118 @@ def _cached_list(cache: Path, source: str) -> Path:
 def _attr_tokens(regex: re.Pattern, html: str, split: bool) -> set[str]:
     out: set[str] = set()
     for m in regex.finditer(html):
-        val = m.group(1) or m.group(2) or m.group(3) or ""
+        val = unescape(m.group(1) or m.group(2) or m.group(3) or "")
         if split:
-            out.update(val.split())
+            out.update(token for token in HTML_SPACE.split(val) if token)
         elif val:
-            out.add(val.strip())
+            out.add(val)
     return out
 
 
-def _patch_csp(value: str, nonce: str) -> str:
-    """Allow our nonce'd <style>/<script> without loosening anything else.
+def _authorize_style(policy: str, source: str) -> str:
+    """Allow one stylesheet while preserving script and style-attribute policy."""
+    directives = policy.split(";")
+    first = {}
+    for index, directive in enumerate(directives):
+        if tokens := directive.split():
+            first.setdefault(tokens[0].lower(), (index, tokens[1:]))
 
-    Only touches style-src / script-src (or default-src when those are absent)
-    that lack 'unsafe-inline'. Adding a nonce to a directive that already has
-    'unsafe-inline' would *disable* unsafe-inline and break the site, so those
-    are left alone.
-    """
-    directives = [d.strip() for d in value.split(";") if d.strip()]
-    names = [d.split()[0].lower() for d in directives]
-    token = f"'nonce-{nonce}'"
-    default = next((d for d in directives if d.split()[0].lower() == "default-src"), None)
+    # Inline style elements fall back through style-src and default-src.
+    name = next((name for name in ("style-src-elem", "style-src", "default-src")
+                 if name in first), None)
+    if name is None:
+        return policy
+    index, sources = first[name]
+    if "'unsafe-inline'" in (token.lower() for token in sources) and not any(INLINE_SOURCE.fullmatch(token) for token in sources):
+        return policy
+    if source in sources:
+        return policy
 
-    out = []
-    for d in directives:
-        name = d.split()[0].lower()
-        if name in ("style-src", "script-src", "style-src-elem", "script-src-elem"):
-            if "'unsafe-inline'" not in d and "'none'" not in d:
-                d = f"{d} {token}"
-            elif "'none'" in d:
-                d = f"{name} {token}"
-        out.append(d)
+    sources = [token for token in sources if token.lower() != "'none'"] + [source]
+    if name == "default-src":
+        # A new element-specific directive keeps the fallback for style attributes.
+        return policy.rstrip("; ") + "; style-src-elem " + " ".join(sources)
+    if name == "style-src":
+        # Older clients use style-src. Pin the existing style attribute fallback
+        # explicitly so that new clients do not inherit the new hash for attributes.
+        if "style-src-attr" not in first:
+            original = " ".join(first[name][1])
+            directives.append(" style-src-attr" + (f" {original}" if original else ""))
+    leading = directives[index][:len(directives[index]) - len(directives[index].lstrip())]
+    directives[index] = leading + name + " " + " ".join(sources)
+    return ";".join(directives)
 
-    # Directives that fall back to default-src need an explicit copy + nonce.
-    if default and "'unsafe-inline'" not in default:
-        base = " ".join(t for t in default.split()[1:] if t != "'none'")
-        for want in ("style-src", "script-src"):
-            if want not in names:
-                out.append(f"{want} {base} {token}".replace("  ", " "))
-    return "; ".join(out)
+
+class _HeadDone(Exception):
+    pass
+
+
+class _DocumentHead(HTMLParser):
+    HEAD_CONTENT = {"html", "base", "basefont", "bgsound", "link", "meta", "title",
+                    "noscript", "noframes", "script", "style", "template"}
+    RAW_CONTENT = {"title", "noscript", "noframes"}
+
+    def __init__(self, text: str):
+        super().__init__(convert_charrefs=False)
+        self.text = text
+        self.position = None
+        self.meta_policy = False
+        self.smart_apps = []
+        self.template_depth = 0
+        self.raw_tag = None
+
+    def _offset(self) -> int:
+        line, column = self.getpos()
+        start = 0
+        for _ in range(line - 1):
+            start = self.text.index("\n", start) + 1
+        return start + column
+
+    def handle_starttag(self, tag, attrs):
+        if self.raw_tag is not None:
+            return
+        if tag in self.RAW_CONTENT:
+            self.raw_tag = tag
+        if tag == "template":
+            self.template_depth += 1
+        if self.template_depth:
+            return
+        if tag == "meta":
+            attributes = dict(reversed(attrs))
+            name = (attributes.get("name") or "").strip().lower()
+            if name == "apple-itunes-app" and "http-equiv" not in attributes:
+                start = self._offset()
+                self.smart_apps.append((start, start + len(self.get_starttag_text())))
+            self.meta_policy |= (
+                (attributes.get("http-equiv") or "").strip().lower() == "content-security-policy"
+            )
+        elif tag == "head":
+            self.position = self._offset() + len(self.get_starttag_text())
+        elif tag not in self.HEAD_CONTENT:
+            self.position = self._offset()
+            raise _HeadDone
+
+    def handle_endtag(self, tag):
+        if self.raw_tag is not None:
+            if tag == self.raw_tag:
+                self.raw_tag = None
+            return
+        if tag == "template" and self.template_depth:
+            self.template_depth -= 1
+        if tag == "head" and not self.template_depth:
+            self.position = self._offset()
+            raise _HeadDone
+
+
+def _document_head(html: str) -> _DocumentHead | None:
+    head = _DocumentHead(html)
+    try:
+        head.feed(html)
+    except _HeadDone:
+        pass
+    except (AssertionError, ValueError):
+        return None
+    return head
 
 
 class FilterEngine:
@@ -231,7 +312,7 @@ class AdBlock:
         self.loaded_at = 0.0
         self._lock = threading.Lock()
         self._reloading = False
-        self.stats = {"blocked": 0, "pages_injected": 0}
+        self.stats = {"blocked": 0, "pages_injected": 0, "app_banners_removed": 0}
 
     # ---- mitmproxy hooks -------------------------------------------------
 
@@ -245,6 +326,8 @@ class AdBlock:
                           "Re-download remote lists after this many hours.")
         loader.add_option("adblock_cosmetic", bool, True,
                           "Inject element-hiding CSS into HTML pages.")
+        loader.add_option("adblock_smart_app_banners", bool, True,
+                          "Remove Safari Smart App Banner metadata from top-level HTML.")
         loader.add_option("adblock_log_blocked", bool, False,
                           "Log every blocked request.")
         loader.add_option("adblock_threatfox_key_file", str,
@@ -314,21 +397,60 @@ class AdBlock:
             return
         if resp.status_code != 200:
             return
-        if "text/html" not in resp.headers.get("content-type", "").lower():
+        mime = resp.headers.get("content-type", "").partition(";")[0].strip().lower()
+        disposition = resp.headers.get("content-disposition", "").partition(";")[0].strip().lower()
+        if mime != "text/html" or disposition == "attachment":
             return
         url = flow.request.pretty_url
-        if _request_type(flow.request, url) not in ("document", "subdocument"):
+        request_type = _request_type(flow.request, url)
+        if request_type not in ("document", "subdocument") or self._filter_refresh(flow, engine):
             return
-        if self._filter_refresh(flow, engine) or not ctx.options.adblock_cosmetic:
+        smart_banners = ctx.options.adblock_smart_app_banners and request_type == "document"
+        if not (smart_banners or ctx.options.adblock_cosmetic):
+            return
+        if any(directive.strip().lower() == "no-transform"
+               for directive in resp.headers.get("cache-control", "").split(",")):
             return
 
         try:
             html = resp.get_text(strict=False)
-        except Exception:
+        except (ValueError, UnicodeError):
             return
-        if not html:
+        if not html or (head := _document_head(html)) is None:
+            return
+        # Authorize CSS only through HTTP headers, leaving HTML meta policies intact.
+        css = ""
+        if ctx.options.adblock_cosmetic and not head.meta_policy and head.position is not None:
+            css = self._stylesheet(engine, url, html)
+        banners = head.smart_apps if smart_banners else []
+        if not (css or banners):
             return
 
+        edits = [(start, end, "") for start, end in banners]
+        if css:
+            snippet = f"<style data-mitm-adblock>{css}</style>"
+            edits.append((head.position, head.position, snippet))
+        for start, end, replacement in sorted(edits, reverse=True):
+            html = html[:start] + replacement + html[end:]
+        resp.set_text(html)
+        if css:
+            source = "'sha256-" + base64.b64encode(hashlib.sha256(css.encode()).digest()).decode("ascii") + "'"
+            for key in ("content-security-policy", "content-security-policy-report-only"):
+                values = resp.headers.get_all(key)
+                if values:
+                    resp.headers.set_all(key, [
+                        ",".join(_authorize_style(policy, source) for policy in value.split(","))
+                        for value in values
+                    ])
+            self.stats["pages_injected"] += 1
+        self.stats["app_banners_removed"] += len(banners)
+        # The origin's validators and digests no longer describe the body.
+        for header in ("etag", "content-md5", "digest", "repr-digest", "content-digest"):
+            if header in resp.headers:
+                del resp.headers[header]
+
+    @staticmethod
+    def _stylesheet(engine: FilterEngine, url: str, html: str) -> str:
         cos = engine.compiled.url_cosmetic_resources(url)
         selectors = set(cos.hide_selectors)
         if not cos.generichide:
@@ -343,25 +465,10 @@ class AdBlock:
             css_parts.extend(f"{s}{{display:none!important}}" for s in sorted(selectors))
         for selector, style in cos.style_rules:
             css_parts.append(f"{selector}{{{style}}}")
-        script = cos.injected_script or ""
-        if not css_parts and not script:
-            return
-
-        nonce = secrets.token_urlsafe(16)
-        snippet = f'<style nonce="{nonce}" data-mitm-adblock>{"".join(css_parts)}</style>'
-        if script.strip():
-            snippet += (f'<script nonce="{nonce}" data-mitm-adblock>'
-                        f"(function(){{try{{{script}}}catch(e){{}}}})();</script>")
-
-        for key in ("content-security-policy", "content-security-policy-report-only"):
-            values = resp.headers.get_all(key)
-            if values:
-                resp.headers.set_all(key, [_patch_csp(v, nonce) for v in values])
-
-        m = HEAD_RE.search(html) or HTML_RE.search(html)
-        html = html[: m.end()] + snippet + html[m.end():] if m else snippet + html
-        resp.set_text(html)
-        self.stats["pages_injected"] += 1
+        # CSS from subscriptions is embedded in an HTML raw-text element.
+        # A literal closing tag must never become active HTML.
+        css = "".join(part for part in css_parts if "</style" not in part.lower())
+        return css.replace("\r\n", "\n").replace("\r", "\n")
 
     def _filter_redirect(self, flow: http.HTTPFlow, engine: FilterEngine) -> None:
         locations = flow.response.headers.get_all("location")

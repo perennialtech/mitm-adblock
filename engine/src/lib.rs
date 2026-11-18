@@ -25,7 +25,6 @@ struct CosmeticResources {
     exceptions: HashSet<String>,
     generichide: bool,
     style_rules: Vec<(String, String)>,
-    injected_script: String,
 }
 
 #[pymethods]
@@ -100,7 +99,6 @@ impl Engine {
             exceptions: resources.exceptions,
             generichide: resources.generichide,
             style_rules,
-            injected_script: resources.injected_script,
         }
     }
 

@@ -1,0 +1,10 @@
+[
+  {
+    "expect": "block",
+    "start_url": "https://kut.lat/N9wN",
+    "click": "#main-btn",
+    "opener_selector": "#gate-title",
+    "opener_url": "https://kut.lat/N9wN",
+    "popup_url": "https://s.click.aliexpress.com/e/_c3W9al2R"
+  }
+]

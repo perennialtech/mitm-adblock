@@ -1,0 +1,10 @@
+[
+  {
+    "expect": "allow",
+    "start_url": "https://www.pcgamer.com/",
+    "click": "a[target='_blank'][href='https://www.pcgamer.com/about-pc-gamer/']",
+    "opener_selector": "#main",
+    "opener_url": "https://www.pcgamer.com/",
+    "popup_url": "https://www.pcgamer.com/about-pc-gamer/"
+  }
+]

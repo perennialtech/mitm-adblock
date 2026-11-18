@@ -28,6 +28,9 @@ MAX_CAMPAIGN_ROWS = 5_000
 BADWARE = "badware.txt"
 THREAT_DOMAINS = "threat-domains.txt"
 FAMILY = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+INJECTED_CSS = re.compile(r"<style data-mitm-adblock>(.*?)</style>", re.DOTALL)
+SHA256 = re.compile(r"[a-f0-9]{64}")
+SCAN_ID = re.compile(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
 DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 
 
@@ -51,15 +54,22 @@ def labels_for(path, entry_count):
         if (
             label["expect"] not in {"block", "block_redirect", "stop_redirect", "allow", "inject"}
             or not FAMILY.fullmatch(label["family"])
+            or not isinstance(label.get("probe", False), bool)
         ):
             raise CorpusError("Invalid expectation or family in labels.")
+        fragment = label.get("css_contains")
+        if fragment is not None and (
+            label["expect"] != "inject" or not isinstance(fragment, str) or not 0 < len(fragment) <= 1024
+        ):
+            raise CorpusError("A CSS fragment needs an inject expectation and 1–1024 characters.")
     return {int(index): label for index, label in raw.items()}
 
 
 def captures(repeat):
     count = 0
     for path in sorted(INPUT.glob("*.har")):
-        entries = json.loads(path.read_bytes())["log"]["entries"]
+        archive = json.loads(path.read_bytes())["log"]
+        entries = archive["entries"]
         if not isinstance(entries, list) or not entries:
             raise CorpusError("Each HAR must contain recorded requests.")
         count += len(entries)
@@ -67,10 +77,34 @@ def captures(repeat):
             raise CorpusError("The corpus and repeat count exceed 100,000 HAR entries per run.")
         label_path = path.with_suffix(".labels.json")
         labels = labels_for(label_path, len(entries))
+        metadata = {}
+        if ranked := archive.get("_rankedScan"):
+            metadata = {"ranked_scan": ranked_scan_info(ranked)}
         yield path.name, entries, labels, {
             "sha256": digest(path),
             **({"labels_sha256": digest(label_path)} if labels else {}),
+            **metadata,
         }
+
+
+def ranked_scan_info(source):
+    if not isinstance(source, dict):
+        raise CorpusError("Invalid ranked scan provenance.")
+    scan = source.get("id")
+    rank = source.get("rank")
+    cohort = source.get("cohort")
+    raw = source.get("raw_sha256")
+    hashes = source.get("snapshots")
+    if (
+        not isinstance(scan, str) or not SCAN_ID.fullmatch(scan)
+        or type(rank) is not int or not 1 <= rank <= 150_000
+        or cohort not in ("adult", "piracy", "overlap")
+        or not isinstance(hashes, dict) or set(hashes) != {"adult", "piracy", "ranking"}
+        or not all(isinstance(value, str) and SHA256.fullmatch(value)
+                   for value in [raw, *hashes.values()])
+    ):
+        raise CorpusError("Invalid ranked scan provenance.")
+    return {"id": scan, "rank": rank, "cohort": cohort, "raw_sha256": raw, "snapshots": hashes}
 
 
 def make_addon():
@@ -101,13 +135,17 @@ def make_addon():
     return addon, {rule.name: digest(rule) for rule in rules}
 
 
-def har_flow(entry):
+def har_flow(entry, infer_resource_types=False):
     from mitmproxy.io.har import request_to_flow
 
     url = urlsplit(entry["request"]["url"])
     if url.scheme not in {"http", "https"} or not url.hostname or url.username is not None:
         return None
     flow = request_to_flow(entry)
+    if infer_resource_types and "sec-fetch-dest" not in flow.request.headers:
+        destination = entry.get("_capturedFetchDest")
+        if destination in {"document", "iframe", "script", "image", "style", "font", "video", "empty", "report"}:
+            flow.request.headers["sec-fetch-dest"] = destination
     if flow.response.status_code == 0:
         flow.response = None
     else:
@@ -122,13 +160,26 @@ def har_flow(entry):
     return flow
 
 
-def run_capture(addon, name, entries, labels, repeat, timings, families, findings):
+def run_capture(addon, name, entries, labels, repeat, timings, families, findings,
+                infer_resource_types=False):
     counts = Counter(entries=len(entries))
+    for entry in entries:
+        if chain := entry.get("_capturedRedirectChain"):
+            if not isinstance(chain, list) or not 2 <= len(chain) <= 30:
+                raise CorpusError("Invalid archived redirect chain.")
+            hosts = [urlsplit(hop).hostname for hop in chain]
+            if not all(hosts):
+                raise CorpusError("Invalid archived redirect hop.")
+            counts["published_redirect_chains"] += 1
+            counts["published_redirect_hops"] += len(chain) - 1
+            counts["published_cross_host_redirect_hops"] += sum(
+                origin != destination for origin, destination in zip(hosts, hosts[1:])
+            )
     for iteration in range(repeat):
         for index, entry in enumerate(entries):
             label = labels.get(index)
             try:
-                flow = har_flow(entry)
+                flow = har_flow(entry, infer_resource_types)
                 if flow is None:
                     counts["unsupported"] += 1
                     if label:
@@ -156,6 +207,11 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
                     addon.stats["pages_injected"] > pages_before
                     and flow.response.raw_content != original_body
                 )
+                fragment = label.get("css_contains") if label else None
+                css_matched = fragment is None or (injected and any(
+                    fragment in match for match in
+                    INJECTED_CSS.findall(flow.response.get_text(strict=False) or "")
+                ))
             except Exception:
                 counts["errors"] += 1
                 if len(findings) < MAX_FINDINGS and iteration == 0:
@@ -183,15 +239,20 @@ def run_capture(addon, name, entries, labels, repeat, timings, families, finding
                     actual = "inject" if injected else "allow"
                 # A permitted page can also receive cosmetic filtering.
                 matched = (
-                    expected == actual
+                    (expected == actual and css_matched)
                     or (expected == "allow" and actual == "inject")
                     or (expected == "stop_redirect" and recorded_redirect and (blocked or blocked_destination))
                 )
                 families[label["family"]]["checked"] += 1
                 families[label["family"]]["missed"] += not matched
-                counts["expectation_misses"] += not matched
+                probe = label.get("probe", False)
+                counts["probe_misses" if probe else "expectation_misses"] += not matched
                 if not matched and len(findings) < MAX_FINDINGS and iteration == 0:
-                    findings.append({"capture": name, "entry": index, "expected": expected, "result": actual})
+                    finding = {"capture": name, "entry": index, "expected": expected,
+                               "result": "missing_css" if actual == "inject" and not css_matched else actual}
+                    if probe:
+                        finding["probe"] = True
+                    findings.append(finding)
     return dict(counts)
 
 
@@ -244,18 +305,19 @@ def probe_domains(addon, path, domains):
     return {"sha256": digest(path), "document_probes": len(domains), "blocked": blocked, "allowed": len(domains) - blocked}
 
 
-def replay(repeat):
+def replay(repeat, infer_resource_types=False):
     started = time.perf_counter()
     addon, lists = make_addon()
     results = {}
     timings = []
     families = defaultdict(Counter)
     findings = []
-    report = {"filter_sha256": lists, "repeat": repeat, "captures": results}
+    report = {"filter_sha256": lists, "repeat": repeat, "captures": results,
+              "infer_resource_types": infer_resource_types}
     for name, entries, labels, files in captures(repeat):
         if len(families.keys() | {label["family"] for label in labels.values()}) > MAX_FAMILIES:
             raise CorpusError("The corpus exceeds 64 expectation families.")
-        counts = run_capture(addon, name, entries, labels, repeat, timings, families, findings)
+        counts = run_capture(addon, name, entries, labels, repeat, timings, families, findings, infer_resource_types)
         results[name] = {**files, **counts}
     for name, filename in CAMPAIGNS.items():
         campaign = INPUT / filename
@@ -287,10 +349,10 @@ def main():
         interfaces = {name for _, name in socket.if_nameindex()}
         if os.geteuid() != 10001 or interfaces - {"lo"}:
             raise CorpusError("Sandbox preflight failed.")
-        if sys.argv[3:] == ["--check"]:
+        if "--check" in sys.argv[3:]:
             report, status = {"isolation_check": "passed", "interfaces": sorted(interfaces)}, 0
         else:
-            report, status = replay(int(sys.argv[1]))
+            report, status = replay(int(sys.argv[1]), "--infer-resource-types" in sys.argv[3:])
             report["isolation_check"] = "passed"
     except CorpusError as error:
         report, status = {"error": str(error)}, 2

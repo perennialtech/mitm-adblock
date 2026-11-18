@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import io
 import os
 import tempfile
@@ -275,6 +277,82 @@ class AdBlockTests(unittest.TestCase):
         self.assertIn(".sponsor{display:none!important}", html)
         self.assertIn(".layout{margin: 0 !important}", html)
         self.assertNotIn(".keep{", html)
+
+    def test_style_authorization_respects_each_csp_and_preserves_document(self):
+        self.load_rules("##.generic-ad", "##.data-token", "page.test##.sponsor")
+        flow = flow_for("https://page.test/")
+        html = ('<!doctype html><!-- <head> -->\n<html><head data-test="a>b">'
+                '<meta charset="utf-8"></head><body data-class="data-token">'
+                '<p class="generic&#45;ad sponsor">Publisher content</p></body></html>')
+        flow.response = http.Response.make(200, html.encode(), {
+            "content-type": "text/html; charset=utf-8", "etag": '"original"',
+        })
+        flow.response.headers.set_all("content-security-policy", [
+            "default-src 'none'; script-src 'self', style-src 'unsafe-inline'",
+            "style-src 'self'; style-src-elem 'none'; style-src-attr 'none'",
+        ])
+        self.addon.response(flow)
+        css = ".generic-ad{display:none!important}.sponsor{display:none!important}"
+        digest = base64.b64encode(hashlib.sha256(css.encode()).digest()).decode()
+        source = f"'sha256-{digest}'"
+        expected = html.replace("</head>", f"<style data-mitm-adblock>{css}</style></head>")
+        self.assertEqual(flow.response.get_text(), expected)
+        self.assertEqual(flow.response.headers.get_all("content-security-policy"), [
+            f"default-src 'none'; script-src 'self'; style-src-elem {source}, style-src 'unsafe-inline'",
+            f"style-src 'self'; style-src-elem {source}; style-src-attr 'none'",
+        ])
+        self.assertNotIn("etag", flow.response.headers)
+
+    def test_cosmetics_leave_meta_csp_no_transform_and_downloads_intact(self):
+        self.load_rules("page.test##.sponsor")
+        for head, extra in (
+            ('<meta http-equiv="Content-Security-Policy" content="style-src \'none\'">', {}),
+            ("", {"cache-control": "private, no-transform"}),
+            ("", {"content-disposition": 'attachment; filename="page.html"'}),
+        ):
+            with self.subTest(head=head, extra=extra):
+                html = f"<!doctype html><html><head>{head}</head><body class=sponsor>Content"
+                flow = flow_for("https://page.test/")
+                flow.response = http.Response.make(200, html.encode(), {
+                    "content-type": "text/html", "etag": '"original"', **extra,
+                })
+                self.addon.response(flow)
+                self.assertEqual(flow.response.get_text(), html)
+                self.assertEqual(flow.response.headers["etag"], '"original"')
+
+    def test_abp_relational_rule_becomes_native_css(self):
+        self.load_rules("page.test#?#div:-abp-has(> .ad-title)")
+        flow = flow_for("https://page.test/")
+        flow.response = http.Response.make(
+            200, b"<html><head></head><body><div><span class=ad-title>Ad</span></div>",
+            {"content-type": "text/html"},
+        )
+        self.addon.response(flow)
+        self.assertRegex(flow.response.get_text(), r"div:has\(>\s*\.ad-title\)\s*\{display:")
+        self.assertNotIn(":-abp-has", flow.response.get_text())
+
+    def test_smart_app_banner_removal_preserves_other_markup(self):
+        self.load_rules("page.test##.extra")
+        banner = '<meta content="app-id=300704847" name="Apple-iTunes-App" />'
+        html = (
+            '<!doctype html><html><head><meta charset="utf-8">'
+            '<meta name="application-name" content="Test">' + banner +
+            '<meta http-equiv="Content-Security-Policy" content="style-src \'none\'">'
+            '</head><body><a href="https://apps.apple.com/">Get the app</a></body></html>'
+        )
+        for enabled, destination in ((True, "document"), (True, "iframe"), (False, "document")):
+            with self.subTest(enabled=enabled, destination=destination):
+                ctx.options.update(adblock_smart_app_banners=enabled)
+                flow = flow_for("https://page.test/")
+                flow.request.headers["sec-fetch-dest"] = destination
+                flow.response = http.Response.make(
+                    200, html.encode(), {"content-type": "text/html", "content-digest": "original"},
+                )
+                self.addon.response(flow)
+                modified = enabled and destination == "document"
+                self.assertEqual(flow.response.get_text(), html.replace(banner, "") if modified else html)
+                self.assertEqual("content-digest" in flow.response.headers, not modified)
+        self.assertEqual(self.addon.stats["app_banners_removed"], 1)
 
 
 if __name__ == "__main__":
