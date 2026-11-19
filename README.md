@@ -73,6 +73,43 @@ exceptions and `$badfilter` rules apply within the supplement.
 The default subscriptions block dedicated affiliate redirect hosts listed by
 Peter Lowe, including direct visits to those redirect hosts.
 
+## Clients that reject the proxy certificate
+
+For enrolled devices, load the optional fallback alongside the ad blocker with
+`-s /app/tls_rejection_fallback.py` in the container, or
+`mitmdump -s adblock_addon.py -s tls_rejection_fallback.py` from a checkout.
+If your deployment already loads a separate TLS rejection script, replace
+that script argument with the packaged one. TCP detection uses pyOpenSSL 25.2
+or newer.
+
+The first rejected connection fails. For the next 120 seconds, a new TCP
+connection from the same client IP to the same destination and SNI hostname on
+port 443 receives the origin certificate. The app validates that certificate
+and its own pin. Requests in that tunnel skip filtering. Other apps on that
+device using the same endpoint can also use the window. Each proxy process
+remembers at most 1,024 entries in memory. After expiry the next connection
+goes through filtering again.
+
+By default the trigger is a fatal TCP `certificate_unknown` or `access_denied`
+alert received during the certificate stage. These alerts indicate rejection.
+Only the client knows whether a pin caused it. An explicit `unknown_ca`, a
+silent disconnect, a known upstream TLS failure or an absent SNI keeps
+filtering in place.
+
+- `--set tls_fallback_tcp_bad_certificate=true` also accepts the TCP
+  `bad_certificate` alert, matching the earlier deployment script. Some
+  clients use this alert for ordinary trust failures, including a missing CA.
+- `--set tls_fallback_quic_to_tcp=true` lets a certificate-stage HTTP/3
+  rejection (`certificate_unknown` or `access_denied` in a QUIC transport
+  close) open the same window for a TCP retry. Enable this where the same proxy
+  process handles both transports. Separate processes have separate caches.
+  HTTP/3 connections continue through filtering because a UDP socket can
+  carry connections to multiple hostnames.
+
+For apps that retry only over HTTP/3 or silently close after checking their
+pin, configure mitmproxy's `ignore_hosts` for the specific endpoint if it
+needs passthrough.
+
 ## ThreatFox
 
 Threat reputation lists provide supplemental protection. To enable ThreatFox,
