@@ -1,30 +1,4 @@
-"""
-mitmproxy ad-blocking addon, powered by Brave's adblock-rust engine.
-
-Network blocking: every request is checked against ABP/uBO-syntax filter
-lists (EasyList, EasyPrivacy, ...). Matches never leave your machine.
-Cosmetic filtering: HTML pages get a <style> block that hides ad elements
-(site-specific ##rules plus generic rules matched against the page's
-classes/ids). CSP authorizes the exact injected stylesheet where necessary.
-
-Install:
-    pip install -r requirements.txt ./engine
-
-Run:
-    mitmdump -s adblock_addon.py
-    mitmdump -s adblock_addon.py --set adblock_lists="https://easylist.to/easylist/easylist.txt,~/my-rules.txt"
-
-Then point your browser/OS proxy at 127.0.0.1:8080 and install the
-mitmproxy CA from http://mitm.it (browse there *through* the proxy).
-
-Options (set with --set name=value):
-    adblock_lists          comma-separated URLs and/or local file paths
-    adblock_cache_dir      where downloaded lists are cached
-    adblock_update_hours   re-download lists after this many hours
-    adblock_cosmetic       true/false, enable element hiding in HTML
-    adblock_smart_app_banners   true/false, remove Safari Smart App Banner tags
-    adblock_log_blocked    true/false, log every blocked request
-"""
+"""Filter HTTP requests and page content using adblock-rust and mitmproxy."""
 
 from __future__ import annotations
 
@@ -333,7 +307,8 @@ class AdBlock:
 
     def load(self, loader) -> None:
         loader.add_option("adblock_lists", str, DEFAULT_LISTS,
-                          "Comma-separated filter list URLs or local paths.")
+                          "Comma-separated filter list URLs or local paths. Setting this replaces the default lists. "
+                          f"Prefix a list with {SUPPLEMENT_PREFIX} to apply it after primary blocks and exceptions.")
         loader.add_option("adblock_cache_dir", str,
                           str(Path.home() / ".cache" / "mitm-adblock"),
                           "Directory for cached filter lists.")
@@ -347,7 +322,8 @@ class AdBlock:
                           "Log every blocked request.")
         loader.add_option("adblock_threatfox_key_file", str,
                           os.environ.get("ADBLOCK_THREATFOX_KEY_FILE", ""),
-                          "File containing the ThreatFox auth key for domain and payload URL blocking.")
+                          "Readable file containing an abuse.ch ThreatFox key for domain and payload URL blocking. "
+                          "Can also be set with ADBLOCK_THREATFOX_KEY_FILE.")
         loader.add_option("adblock_threat_domains_file", str, "",
                           "Local file containing additional exact threat hostnames, one per line.")
 
