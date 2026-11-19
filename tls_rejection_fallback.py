@@ -121,7 +121,11 @@ class CertificateRejectionFallback:
 
     def load(self, loader) -> None:
         loader.add_option("tls_fallback_mode", str, "compatible",
-                          "Automatic certificate fallback policy.", choices=MODES)
+                          "After a client rejects the proxy certificate, compatible lets it retry over TCP or HTTP/3 "
+                          "with the origin certificate. The relayed flow skips filtering, including other hostnames "
+                          "that reuse the same UDP flow. Strict allows only TCP retries after certificate_unknown or "
+                          "access_denied. Off disables automatic fallback. Explicit ignore_hosts rules still apply.",
+                          choices=MODES)
 
     def configure(self, updated) -> None:
         if not {"tls_fallback_mode", "scripts"} & updated:

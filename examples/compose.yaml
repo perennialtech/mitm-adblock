@@ -1,0 +1,12 @@
+services:
+  proxy:
+    build: ..
+    image: ${MITM_ADBLOCK_IMAGE:-mitm-adblock:local}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ca:/var/lib/mitmproxy
+    # command: ["--set", "adblock_log_blocked=true"]
+
+volumes:
+  ca:
