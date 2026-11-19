@@ -2,10 +2,18 @@
 set -euo pipefail
 umask 077
 
+usage() {
+    printf 'Usage: %s [--with-campaigns] [--with-ranked-scans] [new corpus directory]\n' "$0"
+    printf '%s\n' 'Stage publisher captures and filter lists for offline replay.' \
+        '  --with-ranked-scans  Include ranked publishers from archived public scans.' \
+        '  --with-campaigns     Include supplemental historical threat probes.'
+}
+
 with_campaigns=false
 with_ranked_scans=false
 while (( $# )); do
     case "$1" in
+        -h|--help) usage; exit 0 ;;
         --with-campaigns) with_campaigns=true ;;
         --with-ranked-scans) with_ranked_scans=true ;;
         *) break ;;
@@ -13,7 +21,7 @@ while (( $# )); do
     shift
 done
 if (( $# > 1 )) || [[ ${1:-} == -* ]]; then
-    printf 'Usage: %s [--with-campaigns] [--with-ranked-scans] [new corpus directory]\n' "$0" >&2
+    usage >&2
     exit 2
 fi
 destination=${1:-stress-corpus}

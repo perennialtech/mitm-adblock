@@ -20,33 +20,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build image
+      - name: Build and test image
         run: |
           docker buildx create --use --driver docker-container
-          docker buildx build --platform linux/amd64 --load --tag mitm-adblock:ci .
-
-      - name: Test addon
-        run: |
-          docker run --rm --network=none --entrypoint python \
-            --mount "type=bind,source=$GITHUB_WORKSPACE/tests,target=/tests,readonly" \
-            -e PYTHONPATH=/app -e FALLBACK_WIRE_TEST=1 mitm-adblock:ci -m unittest discover -s /tests
-
-      - name: Smoke test
-        run: |
-          printf '/filtered.js$script\n' > "$RUNNER_TEMP/filter.txt"
-          trap 'docker logs mitm-adblock-ci; docker rm --force mitm-adblock-ci' EXIT
-          docker run --detach --name mitm-adblock-ci --publish 127.0.0.1::8080 \
-            --mount "type=bind,source=$RUNNER_TEMP/filter.txt,target=/filter.txt,readonly" \
-            mitm-adblock:ci --set adblock_lists=/filter.txt
-
-          proxy="http://$(docker port mitm-adblock-ci 8080/tcp)"
-          curl -q --fail --silent --show-error --noproxy '' --proxy "$proxy" \
-            --retry 10 --retry-all-errors --retry-delay 1 --max-time 5 \
-            --output /dev/null http://mitm.it/
-          status=$(curl -q --silent --show-error --noproxy '' --proxy "$proxy" --max-time 5 \
-            --header 'Sec-Fetch-Dest: script' --output /dev/null --write-out '%{http_code}' \
-            http://example.invalid/filtered.js)
-          test "$status" = 204
+          ./scripts/check-image
 
       - name: Publish to GHCR
         env:

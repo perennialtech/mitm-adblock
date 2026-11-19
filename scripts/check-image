@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    echo "Usage: $0 [existing-image]"
+    echo "Build the checkout and run the image tests, or test an image you already built."
+}
+if [[ ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# > 1 )); then
+    usage >&2
+    exit 2
+fi
+
+cd -- "$(dirname -- "$0")/.."
+image=${1:-mitm-adblock:ci}
+if (( $# == 0 )); then
+    docker buildx build --platform linux/amd64 --load --tag "$image" .
+fi
+
+docker run --rm --network=none --entrypoint python \
+    --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+    -e PYTHONPATH=/app -e FALLBACK_WIRE_TEST=1 "$image" -m unittest discover -s /tests
+
+filter=$(mktemp)
+container=
+cleanup() {
+    if [[ -n $container ]]; then
+        docker logs "$container" >&2 || true
+        docker rm --force "$container" >/dev/null || true
+    fi
+    rm -f -- "$filter"
+}
+trap cleanup EXIT
+printf '%s\n' '/filtered.js$script' > "$filter"
+chmod 644 "$filter"
+container=$(docker run --detach --publish 127.0.0.1::8080 \
+    --mount "type=bind,source=$filter,target=/filter.txt,readonly" \
+    "$image" --set adblock_lists=/filter.txt)
+
+proxy="http://$(docker port "$container" 8080/tcp)"
+curl -q --fail --silent --show-error --noproxy '' --proxy "$proxy" \
+    --retry 10 --retry-all-errors --retry-delay 1 --max-time 5 \
+    --output /dev/null http://mitm.it/
+status=$(curl -q --silent --show-error --noproxy '' --proxy "$proxy" --max-time 5 \
+    --header 'Sec-Fetch-Dest: script' --output /dev/null --write-out '%{http_code}' \
+    http://example.invalid/filtered.js)
+if [[ $status != 204 ]]; then
+    echo "Expected HTTP 204 for the blocked script, received $status" >&2
+    exit 1
+fi

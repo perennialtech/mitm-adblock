@@ -38,6 +38,15 @@ MAX_REPORT = 128 * 1024
 IMAGE = "mitm-adblock:stress"
 BROWSER_IMAGE = "mitm-adblock:stress-browser"
 
+# HTTP and browser replay have different resource requirements.
+REPLAY_DEFAULTS = {
+    "repeat": (20, 3),
+    "memory_mib": (1536, 2048),
+    "cpus": (1, 2),
+    "pids_limit": (64, 128),
+    "timeout_seconds": (120, 240),
+}
+
 
 def docker(*args):
     result = subprocess.run(
@@ -59,7 +68,7 @@ def preflight(image_name=IMAGE):
         raise ValueError("Docker must enforce CPU, memory, swap and process limits using cgroup v2.")
     settings = json.loads(runtime) or {}
     if Path(settings.get("path", "")).name != "runsc":
-        raise ValueError("Docker's runsc runtime is required. See stress/README.md.")
+        raise ValueError("Docker's runsc runtime is required. See the stress testing workflow in AGENTS.md.")
     image = json.loads(docker("image", "inspect", "--format", "{{json .}}", image_name))
     if image["Config"].get("Volumes"):
         raise ValueError("The replay image must have no declared volumes.")
@@ -206,18 +215,20 @@ def positive_int(value):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    budgets = ", ".join(f"--{name.replace('_', '-')} {http}/{browser}"
+                       for name, (http, browser) in REPLAY_DEFAULTS.items())
+    parser = argparse.ArgumentParser(description=__doc__, epilog=f"Defaults (HTTP/browser): {budgets}.")
     parser.add_argument("corpus", type=Path, nargs="?")
     parser.add_argument("--repeat", type=int, choices=range(1, 101), metavar="1..100",
-                        help="Repetitions per case (HTTP: 20, browser: 3).")
+                        help="Repetitions per case.")
     parser.add_argument("--memory-mib", type=positive_int,
-                        help="Container RAM in MiB, with swap disabled (HTTP: 1536, browser: 2048).")
+                        help="Container RAM in MiB, with swap disabled.")
     parser.add_argument("--cpus", type=positive_int,
-                        help="Container CPU quota in cores (HTTP: 1, browser: 2).")
+                        help="Container CPU quota in cores.")
     parser.add_argument("--pids-limit", type=positive_int,
-                        help="Container task limit (HTTP: 64, browser: 128).")
+                        help="Container task limit.")
     parser.add_argument("--timeout-seconds", type=positive_int,
-                        help="Replay wall-clock budget (HTTP: 120s, browser: 240s).")
+                        help="Replay wall-clock budget.")
     parser.add_argument("--infer-resource-types", action="store_true",
                         help="Use captured browser types when Sec-Fetch-Dest is missing.")
     parser.add_argument("--clicks", action="store_true",
@@ -228,11 +239,9 @@ def main():
         parser.error("supply either a corpus directory or --check")
     if args.clicks and args.infer_resource_types:
         parser.error("browser replay already gets resource types from Chromium")
-    args.repeat = args.repeat or (3 if args.clicks else 20)
-    args.memory_mib = args.memory_mib or (2048 if args.clicks else 1536)
-    args.cpus = args.cpus or (2 if args.clicks else 1)
-    args.pids_limit = args.pids_limit or (128 if args.clicks else 64)
-    args.timeout_seconds = args.timeout_seconds or (240 if args.clicks else 120)
+    for name, (http, browser) in REPLAY_DEFAULTS.items():
+        if getattr(args, name) is None:
+            setattr(args, name, browser if args.clicks else http)
     signal.signal(signal.SIGTERM, interrupt)
     try:
         if args.clicks and {name for _, name in socket.if_nameindex()} - {"lo"}:
