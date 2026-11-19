@@ -4,6 +4,9 @@ Prioritize intrusive advertising and everyday browsing annoyances. Focus on
 first-party ads, pop-ups and pop-unders, ad redirects, overlays, and clutter
 left behind by blocked ads. Preserve legitimate page content and interactions.
 
+Favor app connectivity when choosing certificate fallback defaults. Expose
+stricter filtering as an operator setting.
+
 Use maintained upstream filter lists for coverage. Keep site-specific rules
 out of this repository and measure how upstream subscriptions cover each gap.
 

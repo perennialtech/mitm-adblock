@@ -61,6 +61,7 @@ shown in the web interface.
 | `adblock_update_hours` | `24` | How often lists are downloaded again |
 | `adblock_cosmetic` | `true` | Inject element-hiding CSS |
 | `adblock_smart_app_banners` | `true` | Remove Safari Smart App Banner metadata |
+| `tls_fallback_mode` | `compatible` | Recover from certificate rejections on TCP and HTTP/3. Also accepts `strict` or `off`. |
 | `adblock_log_blocked` | `false` | Log every blocked request |
 | `adblock_threatfox_key_file` | empty | Optional path to an abuse.ch ThreatFox authentication key |
 | `adblock_threat_domains_file` | empty | Optional file containing additional exact threat hostnames, one per line |
@@ -75,40 +76,38 @@ Peter Lowe, including direct visits to those redirect hosts.
 
 ## Clients that reject the proxy certificate
 
-For enrolled devices, load the optional fallback alongside the ad blocker with
-`-s /app/tls_rejection_fallback.py` in the container, or
-`mitmdump -s adblock_addon.py -s tls_rejection_fallback.py` from a checkout.
-If your deployment already loads a separate TLS rejection script, replace
-that script argument with the packaged one. TCP detection uses pyOpenSSL 25.2
-or newer.
+The ad blocker automatically helps apps that reject the proxy certificate. The
+first handshake fails. For the next 120 seconds, a fresh TCP or HTTP/3
+connection from the same client IP to the same destination and SNI hostname
+on port 443 can connect through an encrypted tunnel. The app receives the
+origin certificate and checks it normally. Ad blocking skips that tunnel.
 
-The first rejected connection fails. For the next 120 seconds, a new TCP
-connection from the same client IP to the same destination and SNI hostname on
-port 443 receives the origin certificate. The app validates that certificate
-and its own pin. Requests in that tunnel skip filtering. Other apps on that
-device using the same endpoint can also use the window. Each proxy process
-remembers at most 1,024 entries in memory. After expiry the next connection
-goes through filtering again.
+| Setting | Behavior |
+|---|---|
+| `compatible` (default) | A certificate-stage rejection on either transport allows retries on either transport. This includes a client reporting a bad certificate or an unknown CA. |
+| `strict` | Only a fatal TCP `certificate_unknown` or `access_denied` alert enables a TCP retry. HTTP/3 continues through filtering. |
+| `off` | Disables automatic fallback. Explicit mitmproxy `ignore_hosts` rules still apply. |
 
-By default the trigger is a fatal TCP `certificate_unknown` or `access_denied`
-alert received during the certificate stage. These alerts indicate rejection.
-Only the client knows whether a pin caused it. An explicit `unknown_ca`, a
-silent disconnect, a known upstream TLS failure or an absent SNI keeps
-filtering in place.
+Use `--set tls_fallback_mode=strict` to harden the proxy, or
+`--set tls_fallback_mode=off` to require explicit exceptions.
 
-- `--set tls_fallback_tcp_bad_certificate=true` also accepts the TCP
-  `bad_certificate` alert, matching the earlier deployment script. Some
-  clients use this alert for ordinary trust failures, including a missing CA.
-- `--set tls_fallback_quic_to_tcp=true` lets a certificate-stage HTTP/3
-  rejection (`certificate_unknown` or `access_denied` in a QUIC transport
-  close) open the same window for a TCP retry. Enable this where the same proxy
-  process handles both transports. Separate processes have separate caches.
-  HTTP/3 connections continue through filtering because a UDP socket can
-  carry connections to multiple hostnames.
+The window controls when a tunnel can start. An established tunnel lasts
+until the connection closes. Other apps on the same device can use the
+window for that endpoint. While a relayed UDP flow is alive, connections
+using the same client IP and source port to the same server also skip filtering.
+This includes another hostname or a new socket that reuses that port, even
+after the original QUIC connection closes or the two-minute window expires.
+Each proxy process remembers up to 1,024 routes in memory. Cross-transport
+retries share a window only when both reach the same process.
 
-For apps that retry only over HTTP/3 or silently close after checking their
-pin, configure mitmproxy's `ignore_hosts` for the specific endpoint if it
-needs passthrough.
+A silent disconnect, a missing SNI or a known upstream TLS failure does not
+open a window. For an app that silently abandons a connection after checking
+its pin, use a narrowly scoped `ignore_hosts` rule. Learning TCP rejections
+requires pyOpenSSL 25.2 or newer.
+
+If you previously loaded the standalone `tls-rejection-fallback.py`, remove its
+`-s` argument when upgrading. While that script is configured it continues to
+own fallback. The built-in policy takes over when you remove it.
 
 ## ThreatFox
 

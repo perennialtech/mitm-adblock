@@ -2,10 +2,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from aioquic.quic.connection import QuicConnectionState
 from aioquic.quic.events import ConnectionTerminated
 from aioquic.quic.packet import QuicErrorCode, QuicFrameType
 from aioquic.tls import AlertDescription, State
-from mitmproxy import connection, options, tls
+from mitmproxy import connection, exceptions, options, tls
+from mitmproxy.addons.script import ScriptLoader
 from mitmproxy.proxy.context import Context
 from mitmproxy.proxy.layers.quic import ClientQuicLayer, QuicTlsData
 from OpenSSL import SSL
@@ -32,20 +34,36 @@ class FallbackTests(unittest.TestCase):
     def setUp(self):
         self.addon = fallback.CertificateRejectionFallback()
         self.options = options.Options()
+        ScriptLoader().load(self.options)
         self.addon.load(self.options)
         self.enterContext(patch.object(fallback.ctx, "options", self.options, create=True))
 
+    def mode(self, mode):
+        self.options.tls_fallback_mode = mode
+        self.addon.configure({"tls_fallback_mode"})
+
     def quic_failure(self, ctx, alert, *, state=State.SERVER_EXPECT_FINISHED,
-                     frame=QuicFrameType.CRYPTO, resumed=False, reason=""):
+                     frame=QuicFrameType.CRYPTO, resumed=False, reason="", draining=False):
+        self.addon.quic_start_client(QuicTlsData(ctx.client, ctx))
         ctx.client.error = reason
         ctx.layers[-1].quic = SimpleNamespace(
+            _state=QuicConnectionState.DRAINING if draining else QuicConnectionState.TERMINATED,
             tls=SimpleNamespace(state=state, session_resumed=resumed),
             _close_event=ConnectionTerminated(QuicErrorCode.CRYPTO_ERROR + alert, frame, reason),
         )
-        self.addon.tls_failed_client(QuicTlsData(ctx.client, ctx))
+        if not draining:
+            self.addon.tls_failed_client(QuicTlsData(ctx.client, ctx))
+
+    def test_immediate_tcp_retry_after_received_quic_close(self):
+        ctx = context("udp")
+        self.quic_failure(ctx, AlertDescription.certificate_unknown, draining=True)
+        self.assertFalse(self.addon.deadlines)
+        retry = hello(context())
+        self.addon.tls_clienthello(retry)
+        self.assertTrue(retry.ignore_connection)
+        self.assertFalse(self.addon.negotiating)
 
     def test_quic_retry_scope_expiry_and_fixed_deadline(self):
-        self.options.tls_fallback_quic_to_tcp = True
         with patch.object(fallback.time, "monotonic") as now:
             now.return_value = 10
             first = context("udp")
@@ -67,11 +85,8 @@ class FallbackTests(unittest.TestCase):
             self.assertFalse(self.addon._active(fallback.route(retry, "Service.Test.")))
 
     def test_quic_requires_certificate_stage_and_transport_close_code(self):
-        self.options.tls_fallback_quic_to_tcp = True
         ctx = context("udp")
         for alert, overrides in (
-            (AlertDescription.unknown_ca, {}),
-            (AlertDescription.bad_certificate, {}),
             (AlertDescription.user_canceled, {}),
             (AlertDescription.certificate_unknown, {"frame": None}),
             (AlertDescription.access_denied, {"state": State.SERVER_EXPECT_CLIENT_HELLO}),
@@ -86,19 +101,29 @@ class FallbackTests(unittest.TestCase):
         self.addon.tls_failed_client(QuicTlsData(ctx.server, ctx))
         self.assertFalse(self.addon.deadlines)
 
-    def test_quic_learning_requires_opt_in(self):
+    def test_profiles_clear_routes_and_honor_explicit_legacy_script(self):
         ctx = context("udp")
-        self.quic_failure(ctx, AlertDescription.certificate_unknown)
-        self.assertFalse(self.addon.deadlines)
-        self.options.tls_fallback_quic_to_tcp = True
-        self.quic_failure(ctx, AlertDescription.certificate_unknown)
-        self.assertTrue(self.addon.deadlines)
-        self.options.tls_fallback_quic_to_tcp = False
-        self.addon.configure({"tls_fallback_quic_to_tcp"})
-        self.assertFalse(self.addon.deadlines)
+        self.assertEqual(self.options.tls_fallback_mode, "compatible")
+        for profile in ("strict", "off"):
+            self.mode("compatible")
+            self.quic_failure(ctx, AlertDescription.bad_certificate)
+            self.assertTrue(self.addon.deadlines)
+            self.mode(profile)
+            self.assertFalse(self.addon.deadlines)
+            self.quic_failure(ctx, AlertDescription.certificate_unknown)
+            self.assertFalse(self.addon.deadlines)
+        with self.assertRaises(exceptions.OptionsError):
+            self.mode("typo")
+
+        self.mode("compatible")
+        self.options.scripts = ["adblock_addon.py", "/conf/tls-rejection-fallback.py"]
+        self.addon.configure({"scripts"})
+        self.assertEqual(self.addon.mode, "off")
+        self.options.scripts = ["adblock_addon.py"]
+        self.addon.configure({"scripts"})
+        self.assertEqual(self.addon.mode, "compatible")
 
     def test_upstream_failure_prevents_and_revokes_a_window(self):
-        self.options.tls_fallback_quic_to_tcp = True
         ctx = context("udp")
         self.quic_failure(ctx, AlertDescription.certificate_unknown)
         self.assertTrue(self.addon.deadlines)
@@ -125,6 +150,13 @@ class FallbackTests(unittest.TestCase):
         observe(conn, SSL.SSL_CB_LOOP, 1)
         observe(conn, SSL.SSL_CB_WRITE_ALERT, fatal | AlertDescription.bad_certificate)
         observe(conn, SSL.SSL_CB_READ_ALERT, (1 << 8) | AlertDescription.bad_certificate)
+        observe(conn, SSL.SSL_CB_READ_ALERT, fatal | AlertDescription.user_canceled)
+        self.assertFalse(self.addon.deadlines)
+        for alert in (AlertDescription.unknown_ca, AlertDescription.bad_certificate):
+            observe(conn, SSL.SSL_CB_READ_ALERT, fatal | alert)
+            self.assertTrue(self.addon.deadlines)
+            self.addon.deadlines.clear()
+        self.mode("strict")
         observe(conn, SSL.SSL_CB_READ_ALERT, fatal | AlertDescription.unknown_ca)
         observe(conn, SSL.SSL_CB_READ_ALERT, fatal | AlertDescription.bad_certificate)
         self.assertFalse(self.addon.deadlines)
@@ -133,16 +165,15 @@ class FallbackTests(unittest.TestCase):
         self.addon.tls_clienthello(retry)
         self.assertTrue(retry.ignore_connection)
         self.addon.deadlines.clear()
-        self.options.tls_fallback_tcp_bad_certificate = True
-        observe(conn, SSL.SSL_CB_READ_ALERT, fatal | AlertDescription.bad_certificate)
-        self.assertTrue(self.addon.deadlines)
-        self.addon.deadlines.clear()
+        self.mode("off")
+        observe(conn, SSL.SSL_CB_READ_ALERT, fatal | AlertDescription.certificate_unknown)
+        self.assertFalse(self.addon.deadlines)
+        self.mode("compatible")
         observe(conn, SSL.SSL_CB_HANDSHAKE_DONE, 1)
         observe(conn, SSL.SSL_CB_READ_ALERT, fatal | AlertDescription.certificate_unknown)
         self.assertFalse(self.addon.deadlines)
 
     def test_cache_evicts_oldest_and_preserves_other_ignore_decisions(self):
-        self.options.tls_fallback_quic_to_tcp = True
         with patch.object(fallback, "MAX_ENTRIES", 2):
             for host in ("one.test", "two.test", "three.test"):
                 ctx = context("udp")
