@@ -10,3 +10,4 @@ services:
 
 volumes:
   ca:
+    name: mitm-adblock-ca
