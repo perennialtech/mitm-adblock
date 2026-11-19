@@ -1,13 +1,14 @@
 [package]
-name = "mitm-adblock-engine"
+name = "mitm-adblock-policy"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-name = "mitm_adblock_engine"
-crate-type = ["cdylib"]
-
 [dependencies]
 adblock = { version = "=0.13.6", default-features = false, features = ["css-validation", "embedded-domain-resolver", "full-regex-handling"] }
-pyo3 = { version = "=0.30.1", features = ["abi3-py310"] }
+base64 = "0.22"
+html-escape = "0.2"
+http = "1"
+percent-encoding = "2"
+regex = "1"
 serde_json = "1"
+sha2 = "0.11"

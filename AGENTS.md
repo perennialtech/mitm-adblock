@@ -32,7 +32,7 @@ Keep Docker sockets out of replay containers.
    or later and Docker’s [gVisor runsc runtime](https://gvisor.dev/docs/user_guide/install/).
    For browser replay, start the guest Docker daemon with `--bridge=none` so
    the guest has only loopback after disconnection.
-2. From the repo root in the guest, build `docker build -t mitm-adblock:stress .` and stage
+2. From the repo root in the guest, build `docker build --target replay -t mitm-adblock:stress .` and stage
    the corpus with `./stress/stage-public.sh`. For click tests also build
    `docker build -f stress/Dockerfile.browser -t mitm-adblock:stress-browser .`.
    Use `./stress/stage-public.sh --help` for additional capture sets.

@@ -1,5 +1,7 @@
 """Replay archived HTTP events as data, entirely inside the offline sandbox."""
 
+import atexit
+from base64 import b64decode, b64encode
 import csv
 import hashlib
 import json
@@ -8,11 +10,11 @@ import os
 import re
 import signal
 import socket
+import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
-from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 INPUT = Path("/replay")
@@ -107,33 +109,116 @@ def ranked_scan_info(source):
     return {"id": scan, "rank": rank, "cohort": cohort, "raw_sha256": raw, "snapshots": hashes}
 
 
+class ReplayAddon:
+    def __init__(self, input_path):
+        self.stats = {"blocked": 0, "pages_injected": 0}
+        self.process = subprocess.Popen(
+            ["/usr/local/bin/replay-policy", str(input_path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            if self.process.stdout.readline() != '{"ready":true}\n':
+                raise CorpusError("The Rust ad-block policy did not initialize.")
+        except BaseException:
+            self.close()
+            raise
+        atexit.register(self.close)
+
+    def close(self):
+        # Closing the event stream lets the child exit its read loop.
+        try:
+            self.process.stdin.close()
+        except BrokenPipeError:
+            pass
+        self.process.stdout.close()
+        try:
+            self.process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+    @staticmethod
+    def _encode_headers(headers):
+        return [(name.decode("ascii"), b64encode(value).decode("ascii"))
+                for name, value in headers.fields]
+
+    @staticmethod
+    def _decode_headers(values):
+        from mitmproxy import http
+
+        return http.Headers((name.encode("ascii"), b64decode(value)) for name, value in values)
+
+    def _evaluate(self, request, response=None):
+        event = {
+            "url": request.pretty_url,
+            "method": request.method,
+            "request_headers": self._encode_headers(request.headers),
+            "response": response,
+        }
+        try:
+            self.process.stdin.write(json.dumps(event, ensure_ascii=False) + "\n")
+        except UnicodeEncodeError:
+            # Invalid Unicode cannot reach the Rust proxy as a valid URL.
+            return {"outcome": "unchanged"}
+        self.process.stdin.flush()
+        result = json.loads(self.process.stdout.readline())
+        if result["outcome"] == "error":
+            raise CorpusError("The Rust ad-block policy could not process a replay event.")
+        return result
+
+    def _block(self, flow, result):
+        from mitmproxy import http
+
+        flow.response = http.Response.make(
+            result["status"], b64decode(result["body"]), self._decode_headers(result["headers"]),
+        )
+        flow.metadata["adblock"] = result["rule"]
+        if result["navigation"] is not None:
+            flow.metadata["adblock_" + result["navigation"]] = True
+        self.stats["blocked"] += 1
+
+    def request(self, flow):
+        if flow.response is None:
+            result = self._evaluate(flow.request)
+            if result["outcome"] == "block":
+                self._block(flow, result)
+
+    def response(self, flow):
+        response = flow.response
+        if response is None or "adblock" in flow.metadata:
+            return
+        html = None
+        mime = response.headers.get("content-type", "").partition(";")[0].strip().lower()
+        if response.status_code == 200 and mime == "text/html":
+            try:
+                html = response.get_text(strict=False)
+                if html is not None:
+                    html.encode("utf-8")
+            except ValueError:
+                html = None
+        result = self._evaluate(flow.request, {
+            "status": response.status_code,
+            "headers": self._encode_headers(response.headers),
+            "html": html,
+        })
+        if result["outcome"] == "block":
+            self._block(flow, result)
+        elif result["outcome"] == "rewrite":
+            response.headers = self._decode_headers(result["headers"])
+            response.set_text(result["html"])
+            self.stats["pages_injected"] += result["injected"]
+
+
 def make_addon():
-    # The launcher runs Python in isolated mode. Load only the app baked into
-    # the trusted image, even if an input file has a Python-looking name.
-    sys.path.insert(0, "/app")
-    from mitmproxy import ctx, options
-
-    from adblock_addon import AdBlock
-
-    addon = AdBlock()
-    opts = options.Options()
-    addon.load(SimpleNamespace(add_option=opts.add_option))
-    ctx.options = opts
     rules = sorted(path for path in INPUT.glob("*.txt") if path.name != THREAT_DOMAINS)
-    subscriptions = [f"supplement:{path}" if path.name == "adguard-base.txt" else str(path) for path in rules]
     domains = INPUT / THREAT_DOMAINS
-    opts.update(
-        adblock_lists=",".join(subscriptions),
-        adblock_cache_dir="/unused",
-        adblock_update_hours=0,
-        adblock_threat_domains_file=str(domains) if domains.exists() else "",
-    )
-    addon.configure({"adblock_lists", "adblock_cache_dir"})
-    if addon.engine is None:
-        raise CorpusError("The ad-block engine did not initialize.")
     if domains.exists():
         rules.append(domains)
-    return addon, {rule.name: digest(rule) for rule in rules}
+    return ReplayAddon(INPUT), {rule.name: digest(rule) for rule in rules}
 
 
 def har_flow(entry, infer_resource_types=False):

@@ -20,20 +20,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Sign in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
       - name: Build and test image
         run: |
           docker buildx create --use --driver docker-container
-          ./scripts/check-image
+          MITM_ADBLOCK_BUILD_CACHE="$IMAGE:buildcache" ./scripts/check-image
 
       - name: Publish to GHCR
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           tags=(--tag "$IMAGE:sha-$GITHUB_SHA")
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             tags+=(--tag "$IMAGE:$GITHUB_REF_NAME" --tag "$IMAGE:latest")
           fi
           docker buildx build --platform linux/amd64 \
+            --cache-to "type=registry,ref=$IMAGE:buildcache,mode=max" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --output type=registry,oci-mediatypes=true "${tags[@]}" .

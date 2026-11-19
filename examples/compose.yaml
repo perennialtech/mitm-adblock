@@ -6,8 +6,10 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - ca:/var/lib/mitmproxy
+      - lists:/var/cache/mitm-adblock
     # command: ["--set", "adblock_log_blocked=true"]
 
 volumes:
   ca:
     name: mitm-adblock-ca
+  lists:

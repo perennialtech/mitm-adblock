@@ -1,53 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage() {
-    echo "Usage: $0 [existing-image]"
-    echo "Build the checkout and run the image tests, or test an image you already built."
-}
 if [[ ${1:-} == --help ]]; then
-    usage
+    echo "Usage: $0 [existing-image]"
+    echo "Run the Rust suite, exercise the binary from the image on isolated loopback, and smoke-test the image entrypoint."
     exit 0
 fi
-if (( $# > 1 )); then
-    usage >&2
-    exit 2
-fi
-
+(( $# <= 1 )) || exit 2
 cd -- "$(dirname -- "$0")/.."
 image=${1:-mitm-adblock:ci}
-if (( $# == 0 )); then
-    docker buildx build --platform linux/amd64 --load --tag "$image" .
+build=(docker buildx build --platform linux/amd64 --load)
+if [[ -n ${MITM_ADBLOCK_BUILD_CACHE:-} ]]; then
+    build+=(--cache-from "type=registry,ref=$MITM_ADBLOCK_BUILD_CACHE")
 fi
+if (( $# == 0 )); then
+    "${build[@]}" --tag "$image" .
+fi
+"${build[@]}" --target replay --tag mitm-adblock:ci-test-tools .
 
-docker run --rm --network=none --entrypoint python \
-    --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
-    -e PYTHONPATH=/app -e FALLBACK_WIRE_TEST=1 "$image" -m unittest discover -s /tests
-
-filter=$(mktemp)
+scratch=$(mktemp -d)
 container=
+extract=
 cleanup() {
-    if [[ -n $container ]]; then
-        docker logs "$container" >&2 || true
-        docker rm --force "$container" >/dev/null || true
-    fi
-    rm -f -- "$filter"
+    if [[ -n $container ]]; then docker rm -f "$container" >/dev/null; fi
+    if [[ -n $extract ]]; then docker rm -f "$extract" >/dev/null; fi
+    rm -rf -- "$scratch"
 }
 trap cleanup EXIT
-printf '%s\n' '/filtered.js$script' > "$filter"
-chmod 644 "$filter"
-container=$(docker run --detach --publish 127.0.0.1::8080 \
-    --mount "type=bind,source=$filter,target=/filter.txt,readonly" \
-    "$image" --set adblock_lists=/filter.txt)
+extract=$(docker create "$image")
+docker cp "$extract:/usr/local/bin/mitm-adblock" "$scratch/mitm-adblock"
+chmod 755 "$scratch" "$scratch/mitm-adblock"
+docker run --rm --network none --user 10001:10001 \
+    --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+    --mount "type=bind,source=$scratch/mitm-adblock,target=/usr/local/bin/mitm-adblock,readonly" \
+    -e FALLBACK_WIRE_TEST=1 --entrypoint python mitm-adblock:ci-test-tools -m unittest discover -s /tests
 
-proxy="http://$(docker port "$container" 8080/tcp)"
-curl -q --fail --silent --show-error --noproxy '' --proxy "$proxy" \
-    --retry 10 --retry-all-errors --retry-delay 1 --max-time 5 \
-    --output /dev/null http://mitm.it/
-status=$(curl -q --silent --show-error --noproxy '' --proxy "$proxy" --max-time 5 \
-    --header 'Sec-Fetch-Dest: script' --output /dev/null --write-out '%{http_code}' \
-    http://example.invalid/filtered.js)
-if [[ $status != 204 ]]; then
-    echo "Expected HTTP 204 for the blocked script, received $status" >&2
-    exit 1
+if [[ -c /dev/net/tun ]]; then
+    docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN --device /dev/net/tun \
+        --user 0:0 -e TUN_WIRE_TEST=1 \
+        --mount "type=bind,source=$PWD/tests,target=/tests,readonly" \
+        --mount "type=bind,source=$scratch/mitm-adblock,target=/usr/local/bin/mitm-adblock,readonly" \
+        --entrypoint python mitm-adblock:ci-test-tools -m unittest discover -s /tests -p test_kernel_tun.py
 fi
+
+printf '%s\n' '/filtered.js$script' > "$scratch/filter"
+chmod 644 "$scratch/filter"
+container=$(docker run --detach --publish 127.0.0.1::8080 \
+    --mount "type=bind,source=$scratch/filter,target=/filter.txt,readonly" \
+    "$image" --set adblock_lists=/filter.txt)
+proxy="http://$(docker port "$container" 8080/tcp)"
+curl -qfsS --noproxy '' --proxy "$proxy" --retry 10 --retry-all-errors --retry-delay 1 \
+    --max-time 5 --output /dev/null http://mitm.it/ || { docker logs "$container"; exit 1; }
+status=$(curl -qsS --noproxy '' --proxy "$proxy" --max-time 5 --header 'Sec-Fetch-Dest: script' \
+    --output /dev/null --write-out '%{http_code}' http://example.invalid/filtered.js)
+[[ $status == 204 ]] || { echo "Expected HTTP 204, received $status" >&2; exit 1; }

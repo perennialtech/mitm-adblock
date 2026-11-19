@@ -1,4 +1,4 @@
-"""Replay archived browser clicks with the production HTTP addon or an unfiltered baseline."""
+"""Replay archived browser clicks with the production Rust filtering policy or an unfiltered baseline."""
 
 from collections import Counter
 import json
