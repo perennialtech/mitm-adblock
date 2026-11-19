@@ -29,7 +29,7 @@ jobs:
         run: |
           docker run --rm --network=none --entrypoint python \
             --mount "type=bind,source=$GITHUB_WORKSPACE/tests,target=/tests,readonly" \
-            -e PYTHONPATH=/app mitm-adblock:ci /tests/test_addon.py
+            -e PYTHONPATH=/app -e FALLBACK_WIRE_TEST=1 mitm-adblock:ci -m unittest discover -s /tests
 
       - name: Smoke test
         run: |

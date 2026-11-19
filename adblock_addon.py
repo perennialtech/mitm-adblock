@@ -45,6 +45,7 @@ from pathlib import Path
 from mitm_adblock_engine import Engine
 from mitmproxy import ctx, http
 
+from tls_rejection_fallback import CertificateRejectionFallback
 from threatfox import MAX_AGE_SECONDS, ThreatFoxSnapshot, exact_url_key, fetch_snapshot, valid_domains
 
 log = logging.getLogger("adblock")
@@ -661,4 +662,4 @@ def _esc(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-addons = [AdBlock()]
+addons = [AdBlock(), CertificateRejectionFallback()]
